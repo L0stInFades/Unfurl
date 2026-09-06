@@ -1,0 +1,7 @@
+/build/
+/.cache/
+/artifacts/
+/.vs/
+*.user
+*.suo
+*.VC.db

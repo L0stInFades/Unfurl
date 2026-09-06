@@ -1,0 +1,41 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "UNFURL_BUILD_APP": "ON",
+        "UNFURL_BUILD_TESTS": "OFF",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed/windows-release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "core-tests",
+      "displayName": "Core tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/core-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "UNFURL_BUILD_APP": "OFF",
+        "UNFURL_BUILD_TESTS": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build/vcpkg_installed/core-tests",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
+    { "name": "core-tests", "configurePreset": "core-tests", "configuration": "Debug" }
+  ],
+  "testPresets": [
+    { "name": "core-tests", "configurePreset": "core-tests", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/.vcpkg'
+          vcpkgJsonIgnores: '**/vcpkg-configuration.json'
+      - name: Configure core tests
+        run: cmake --preset core-tests -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg
+      - name: Build core tests
+        run: cmake --build --preset core-tests
+      - name: Run core tests
+        run: ctest --preset core-tests
+
+  windows-app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: lukka/get-cmake@latest
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/.vcpkg'
+      - name: Restore Windows App SDK
+        shell: pwsh
+        run: ./eng/restore-windows-app-sdk.ps1
+      - name: Configure application
+        run: cmake --preset windows-release -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg
+      - name: Build application
+        run: cmake --build --preset windows-release
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DoozyX/clang-format-lint-action@v0.20
+        with:
+          source: 'src tests include'
+          extensions: 'h,cpp'
+          clangFormatVersion: 18
