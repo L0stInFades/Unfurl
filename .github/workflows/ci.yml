@@ -45,5 +45,55 @@ jobs:
       - uses: DoozyX/clang-format-lint-action@v0.20
         with:
           source: 'src tests include'
-          extensions: 'h,cpp'
+          extensions: 'h,hpp,cpp'
           clangFormatVersion: 18
+
+  tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+      - uses: lukka/get-cmake@latest
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/.vcpkg'
+      - name: Configure core compile database
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake --preset core-tests -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg -DVCPKG_TARGET_TRIPLET=x64-linux
+      - name: Run clang-tidy
+        run: clang-tidy -p build/core-tests src/core/archive_engine.cpp --quiet
+
+  release:
+    needs: [core, windows-app]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: lukka/get-cmake@latest
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/.vcpkg'
+      - name: Restore Windows App SDK
+        shell: pwsh
+        run: ./eng/restore-windows-app-sdk.ps1
+      - name: Configure release
+        run: cmake --preset windows-release -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg
+      - name: Build release
+        run: cmake --build --preset windows-release
+      - name: Validate MSIX and App Installer packaging
+        shell: pwsh
+        run: |
+          ./eng/new-signing-certificate.ps1 -Output artifacts/ci-certificate.cer
+          $certificate = Import-Certificate -FilePath artifacts/ci-certificate.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+          ./eng/package-msix.ps1 -Output artifacts/ci-release -CertificateThumbprint $certificate.Thumbprint
+          ./eng/verify-release.ps1 -Path artifacts/ci-release
+      - name: Upload portable release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unfurl-windows-x64
+          path: artifacts/ci-release/Unfurl-Release.zip

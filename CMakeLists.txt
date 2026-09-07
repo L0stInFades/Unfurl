@@ -36,6 +36,9 @@ if(UNFURL_BUILD_TESTS)
   add_executable(unfurl_core_tests tests/core_tests.cpp)
   target_link_libraries(unfurl_core_tests PRIVATE unfurl_core)
   target_compile_features(unfurl_core_tests PRIVATE cxx_std_23)
+  if(MSVC)
+    target_compile_options(unfurl_core_tests PRIVATE /utf-8 /EHsc)
+  endif()
   add_test(NAME unfurl.core COMMAND unfurl_core_tests)
 endif()
 
@@ -55,6 +58,8 @@ if(UNFURL_BUILD_APP)
     src/app/MainPage.h
     src/app/Unfurl.rc
   )
+  set_source_files_properties(src/app/Unfurl.rc PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/src/app/Unfurl.manifest;${CMAKE_SOURCE_DIR}/src/app/Unfurl.ico;${CMAKE_SOURCE_DIR}/src/app/MainPage.xaml")
   target_include_directories(Unfurl PRIVATE "${WINDOWS_APP_SDK_ROOT}/include")
   if(DEFINED ENV{WindowsSdkDir} AND DEFINED ENV{WindowsSdkVersion})
     target_include_directories(Unfurl PRIVATE "$ENV{WindowsSdkDir}/Include/$ENV{WindowsSdkVersion}/cppwinrt")
@@ -82,7 +87,7 @@ if(UNFURL_BUILD_APP)
     target_include_directories(Unfurl PRIVATE "${UNFURL_WINRT_OUTPUT}")
   endif()
   target_link_directories(Unfurl PRIVATE "${WINDOWS_APP_SDK_ROOT}/lib/native/x64")
-  target_link_libraries(Unfurl PRIVATE unfurl_core Microsoft.WindowsAppRuntime.Bootstrap windowsapp)
+  target_link_libraries(Unfurl PRIVATE unfurl_core Microsoft.WindowsAppRuntime.Bootstrap windowsapp shell32 ole32)
   target_compile_definitions(Unfurl PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_compile_options(Unfurl PRIVATE /W4 /permissive- /EHsc /await:strict /utf-8)
   # The application manifest is embedded by Unfurl.rc; disable linker's second copy.

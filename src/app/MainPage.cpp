@@ -1,21 +1,29 @@
 #include "MainPage.h"
-
-#include "unfurl/archive_engine.hpp"
+#include "Localization.h"
 
 #include <Windows.h>
+#include <shlobj.h>
+#include <shobjidl.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Microsoft.UI.Xaml.Data.h>
+#include <winrt/Microsoft.UI.Xaml.Markup.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.h>
-#include <winrt/Windows.UI.Text.h>
+#include <winrt/Windows.UI.ViewManagement.h>
 
-#include <cstdint>
+#include <algorithm>
+#include <charconv>
+#include <chrono>
+#include <cmath>
+#include <iomanip>
 #include <limits>
-#include <optional>
-#include <stdexcept>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -26,64 +34,71 @@ using namespace Windows::Storage;
 
 namespace {
 
-Windows::UI::Color color(std::uint8_t red, std::uint8_t green, std::uint8_t blue, std::uint8_t alpha = 255) {
-    return Windows::UI::Color{alpha, red, green, blue};
-}
-
 hstring from_utf8(std::string_view value) {
-    if (value.empty())
-        return {};
-    const auto required =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (required <= 0)
-        return hstring(std::wstring(value.begin(), value.end()));
-    std::wstring wide(static_cast<std::size_t>(required), L'\0');
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), wide.data(),
-                        required);
-    return hstring(wide);
+    return to_hstring(value);
 }
 
-SolidColorBrush brush(std::uint8_t red, std::uint8_t green, std::uint8_t blue, std::uint8_t alpha = 255) {
-    return SolidColorBrush(color(red, green, blue, alpha));
-}
-
-Thickness thickness(double left, double top, double right, double bottom) {
-    Thickness value{};
-    value.Left = left;
-    value.Top = top;
-    value.Right = right;
-    value.Bottom = bottom;
-    return value;
-}
-
-Thickness thickness(double uniform) {
-    return thickness(uniform, uniform, uniform, uniform);
-}
-
-CornerRadius corner_radius(double top_left, double top_right, double bottom_right, double bottom_left) {
-    CornerRadius value{};
-    value.TopLeft = top_left;
-    value.TopRight = top_right;
-    value.BottomRight = bottom_right;
-    value.BottomLeft = bottom_left;
-    return value;
+hstring display_size(std::uint64_t bytes) {
+    if (bytes < 1024)
+        return to_hstring(bytes) + L" B";
+    double amount = static_cast<double>(bytes);
+    const wchar_t* units[] = {L"B", L"KiB", L"MiB", L"GiB", L"TiB"};
+    int unit = 0;
+    while (amount >= 1024 && unit < 4) {
+        amount /= 1024;
+        ++unit;
+    }
+    std::wostringstream text;
+    text << std::fixed << std::setprecision(amount < 10 ? 1 : 0) << amount << L" " << units[unit];
+    return hstring(text.str());
 }
 
 unfurl::ArchiveFormat format_from_index(std::int32_t index) {
-    switch (index) {
-    case 1:
-        return unfurl::ArchiveFormat::seven_zip;
-    case 2:
-        return unfurl::ArchiveFormat::tar_gzip;
-    case 3:
-        return unfurl::ArchiveFormat::tar_bzip2;
-    case 4:
-        return unfurl::ArchiveFormat::tar_xz;
-    case 5:
-        return unfurl::ArchiveFormat::tar_zstd;
-    default:
-        return unfurl::ArchiveFormat::zip;
+    constexpr unfurl::ArchiveFormat formats[] = {unfurl::ArchiveFormat::zip,      unfurl::ArchiveFormat::seven_zip,
+                                                 unfurl::ArchiveFormat::tar_gzip, unfurl::ArchiveFormat::tar_bzip2,
+                                                 unfurl::ArchiveFormat::tar_xz,   unfurl::ArchiveFormat::tar_zstd};
+    return formats[index >= 0 && index < 6 ? index : 0];
+}
+
+std::vector<std::filesystem::path> choose_paths(HWND owner, bool folders, bool archives, bool multiple = true) {
+    com_ptr<IFileOpenDialog> dialog;
+    check_hresult(CoCreateInstance(__uuidof(FileOpenDialog), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IFileOpenDialog),
+                                   dialog.put_void()));
+    FILEOPENDIALOGOPTIONS options{};
+    check_hresult(dialog->GetOptions(&options));
+    options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+    if (multiple)
+        options |= FOS_ALLOWMULTISELECT;
+    options |= folders ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST;
+    check_hresult(dialog->SetOptions(options));
+    check_hresult(dialog->SetTitle(!multiple  ? L"选择保存位置"
+                                   : folders  ? L"添加文件夹"
+                                   : archives ? L"打开压缩包"
+                                              : L"添加文件"));
+    if (archives) {
+        const COMDLG_FILTERSPEC filters[] = {
+            {L"压缩包", L"*.zip;*.7z;*.rar;*.tar;*.gz;*.bz2;*.xz;*.zst;*.tgz;*.tbz2;*.txz;*.001"},
+            {L"所有文件", L"*.*"}};
+        check_hresult(dialog->SetFileTypes(2, filters));
     }
+    const auto result = dialog->Show(owner);
+    if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+        return {};
+    check_hresult(result);
+    com_ptr<IShellItemArray> items;
+    check_hresult(dialog->GetResults(items.put()));
+    DWORD count{};
+    check_hresult(items->GetCount(&count));
+    std::vector<std::filesystem::path> paths;
+    for (DWORD index = 0; index < count; ++index) {
+        com_ptr<IShellItem> item;
+        check_hresult(items->GetItemAt(index, item.put()));
+        PWSTR path{};
+        check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH, &path));
+        paths.emplace_back(path);
+        CoTaskMemFree(path);
+    }
+    return paths;
 }
 
 } // namespace
@@ -96,299 +111,813 @@ MainPage::MainPage() {
 }
 
 void MainPage::BuildUi() {
-    auto root = Grid();
-    root.Padding(thickness(32, 24, 32, 28));
-    root.RowDefinitions().Append(RowDefinition());
-    root.RowDefinitions().Append(RowDefinition());
-    root.RowDefinitions().Append(RowDefinition());
-    root.RowDefinitions().GetAt(0).Height(GridLength{1, GridUnitType::Auto});
-    root.RowDefinitions().GetAt(1).Height(GridLength{1, GridUnitType::Star});
-    root.RowDefinitions().GetAt(2).Height(GridLength{1, GridUnitType::Auto});
+    Language(L"zh-CN");
+    FontFamily(Media::FontFamily(L"Microsoft YaHei UI"));
+    FontSize(14);
+    // Let the window's Mica show through the NavigationView's translucent Fluent layers.
+    Background(SolidColorBrush(Windows::UI::Color{0, 0, 0, 0}));
+    const auto module = GetModuleHandleW(nullptr);
+    const auto resource = FindResourceW(module, MAKEINTRESOURCEW(2), RT_RCDATA);
+    if (!resource)
+        throw_last_error();
+    const auto data = LockResource(LoadResource(module, resource));
+    const auto size = SizeofResource(module, resource);
+    const auto root = Markup::XamlReader::Load(from_utf8({static_cast<const char*>(data), size})).as<Grid>();
+    const auto find = [&root]<typename T>(const wchar_t* name, T& control) {
+        control = root.FindName(name).as<T>();
+        Automation::AutomationProperties::SetAutomationId(control, name);
+    };
+    find(L"WindowTitleBar", title_bar_);
+    find(L"WorkspaceNavigation", navigation_);
+    find(L"Workspace", workspace_);
+    find(L"AppSettingsPage", app_settings_);
+    find(L"ListHeader", list_header_);
+    find(L"WorkspaceScroll", workspace_scroll_);
+    find(L"BodyGrid", body_);
+    find(L"WorkspaceHeading", workspace_heading_);
+    find(L"CompressNavigation", compress_navigation_);
+    find(L"ExtractNavigation", extract_navigation_);
+    find(L"SelectAllItems", select_all_);
+    find(L"ReadArchiveCommand", read_archive_);
+    find(L"NameFormatGrid", name_format_);
+    find(L"SplitRow", split_row_);
+    find(L"ArchiveOptions", options_);
+    find(L"EmptySelection", empty_selection_);
+    find(L"EmptySelectionText", empty_selection_text_);
+    find(L"DropZone", drop_zone_);
+    find(L"ItemsPanel", items_panel_);
+    find(L"SelectionTitle", selection_title_);
+    find(L"SelectionDetail", selection_detail_);
+    find(L"ItemsHeading", items_heading_);
+    find(L"SettingsHeading", settings_heading_);
+    find(L"StatusText", status_);
+    find(L"FileList", items_);
+    find(L"OperationProgress", progress_);
+    find(L"FormatComboBox", format_);
+    find(L"ThemeChoice", theme_);
+    find(L"ArchivePasswordBox", password_);
+    find(L"SplitSizeBox", split_size_);
+    find(L"ArchiveNameBox", archive_name_);
+    find(L"DestinationBox", destination_);
+    find(L"DestinationPath", destination_path_);
+    find(L"OpenArchiveCommand", open_);
+    find(L"AddFilesCommand", add_files_);
+    find(L"AddFolderCommand", add_folder_);
+    find(L"ClearCommand", clear_);
+    find(L"DestinationCommand", choose_destination_);
+    find(L"RevealCommand", reveal_);
+    find(L"ExtractCommand", extract_);
+    find(L"CompressCommand", compress_);
+    find(L"CancelCommand", cancel_);
+    Automation::AutomationProperties::SetName(extract_, L"解压");
+    Automation::AutomationProperties::SetName(compress_, L"压缩");
+    Automation::AutomationProperties::SetName(reveal_, L"打开输出位置");
+    Automation::AutomationProperties::SetName(open_, L"打开压缩包");
+    Automation::AutomationProperties::SetName(add_files_, L"添加文件");
 
-    auto header = StackPanel();
-    header.Spacing(4);
-    title_ = TextBlock();
-    title_.Text(L"Unfurl");
-    title_.FontFamily(Media::FontFamily(L"Segoe UI Variable Display"));
-    title_.FontSize(30);
-    title_.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
-    subtitle_ = TextBlock();
-    subtitle_.Text(L"Drop an archive to inspect it, or files to compress them.");
-    subtitle_.FontFamily(Media::FontFamily(L"Segoe UI Variable Text"));
-    subtitle_.FontSize(14);
-    subtitle_.Foreground(brush(100, 100, 100));
-    header.Children().Append(title_);
-    header.Children().Append(subtitle_);
-    Grid::SetRow(header, 0);
-    root.Children().Append(header);
+    title_bar_.PaneToggleRequested([this](auto&&, auto&&) { navigation_.IsPaneOpen(!navigation_.IsPaneOpen()); });
+    options_.RegisterPropertyChangedCallback(Expander::IsExpandedProperty(),
+                                             [this](auto&&, auto&&) { PrepareOptionsTransition(); });
+    options_.SizeChanged([this](auto&&, SizeChangedEventArgs const& args) { UpdateOptionsViewport(args); });
+    workspace_scroll_.ViewChanged([this](auto&&, ScrollViewerViewChangedEventArgs const& args) {
+        if (collapse_scroll_target_ && !args.IsIntermediate()) {
+            collapse_scroll_target_.reset();
+            body_.MinHeight(0);
+        }
+    });
+    navigation_.SelectionChanged([this](auto&&, NavigationViewSelectionChangedEventArgs const& args) {
+        if (!args.SelectedItem())
+            return;
+        app_settings_.Visibility(args.IsSettingsSelected() ? Visibility::Visible : Visibility::Collapsed);
+        workspace_.Visibility(args.IsSettingsSelected() ? Visibility::Collapsed : Visibility::Visible);
+        if (args.IsSettingsSelected())
+            return;
+        const auto extracting = args.SelectedItem() == extract_navigation_;
+        if (extract_mode_ != extracting) {
+            extract_mode_ = extracting;
+            ClearSelection();
+        }
+    });
+    navigation_.Loaded([this](auto&&, auto&&) {
+        const auto settings = navigation_.SettingsItem().as<NavigationViewItem>();
+        settings.Content(box_value(L"设置"));
+        settings.IsEnabled(!busy_);
+        Automation::AutomationProperties::SetAutomationId(settings, L"SettingsNavigation");
+        Automation::AutomationProperties::SetName(settings, L"设置");
+        ToolTipService::SetToolTip(settings, box_value(L"设置"));
+    });
 
-    drop_zone_ = Border();
-    drop_zone_.Margin(thickness(0, 24, 0, 20));
-    drop_zone_.Padding(thickness(24));
-    drop_zone_.CornerRadius(corner_radius(12, 12, 12, 12));
-    drop_zone_.BorderThickness(thickness(1));
-    drop_zone_.BorderBrush(brush(0, 103, 192, 110));
-    drop_zone_.Background(brush(0, 103, 192, 18));
-    drop_zone_.AllowDrop(true);
-    auto drop_content = StackPanel();
-    drop_content.HorizontalAlignment(HorizontalAlignment::Center);
-    drop_content.VerticalAlignment(VerticalAlignment::Center);
-    drop_content.Spacing(8);
-    auto glyph = FontIcon();
-    glyph.Glyph(L"\xE74D");
-    glyph.FontSize(34);
-    glyph.HorizontalAlignment(HorizontalAlignment::Center);
-    glyph.Foreground(brush(0, 103, 192));
-    auto prompt = TextBlock();
-    prompt.Text(L"Drop files here");
-    prompt.FontFamily(Media::FontFamily(L"Segoe UI Variable Text"));
-    prompt.FontSize(18);
-    prompt.HorizontalAlignment(HorizontalAlignment::Center);
-    drop_content.Children().Append(glyph);
-    drop_content.Children().Append(prompt);
-    drop_zone_.Child(drop_content);
-    drop_zone_.DragOver(DragEventHandler{this, &MainPage::HandleDragOver});
-    drop_zone_.Drop(DragEventHandler{this, &MainPage::HandleDrop});
-    auto content_area = StackPanel();
-    content_area.Spacing(12);
-    content_area.Children().Append(drop_zone_);
+    items_.SelectionChanged([this](auto&&, SelectionChangedEventArgs const& args) { OnEntrySelectionChanged(args); });
+    items_.ContainerContentChanging([this](auto&&, ContainerContentChangingEventArgs const& args) {
+        if (args.InRecycleQueue())
+            return;
+        const auto data =
+            args.Item().as<Windows::Foundation::Collections::IMap<hstring, Windows::Foundation::IInspectable>>();
+        Automation::AutomationProperties::SetName(args.ItemContainer(), unbox_value<hstring>(data.Lookup(L"Name")));
+        Automation::AutomationProperties::SetAutomationId(
+            args.ItemContainer(),
+            (extract_mode_ ? hstring(L"ArchiveEntry") : hstring(L"SourceItem")) + to_hstring(args.ItemIndex()));
+    });
+    select_all_.Click([this](auto&&, auto&&) {
+        if (busy_ || preview_entries_.empty())
+            return;
+        const auto all = std::ranges::all_of(entry_selection_, [](bool value) { return value; });
+        updating_selection_ = true;
+        if (all)
+            items_.DeselectRange(Data::ItemIndexRange(0, items_.Items().Size()));
+        else
+            items_.SelectAll();
+        std::fill(entry_selection_.begin(), entry_selection_.end(), !all);
+        updating_selection_ = false;
+        RefreshEntrySelection();
+    });
 
-    auto options = StackPanel();
-    options.Orientation(Orientation::Horizontal);
-    options.HorizontalAlignment(HorizontalAlignment::Left);
-    options.Spacing(12);
-    format_ = ComboBox();
-    format_.Header(box_value(L"Format"));
-    format_.Items().Append(box_value(L"ZIP"));
-    format_.Items().Append(box_value(L"7Z"));
-    format_.Items().Append(box_value(L"TAR.GZ"));
-    format_.Items().Append(box_value(L"TAR.BZ2"));
-    format_.Items().Append(box_value(L"TAR.XZ"));
-    format_.Items().Append(box_value(L"TAR.ZST"));
-    format_.SelectedIndex(0);
-    format_.Width(140);
-    password_ = PasswordBox();
-    password_.Header(box_value(L"Password"));
-    password_.PlaceholderText(L"Optional");
-    password_.MaxLength(1024);
-    password_.Width(190);
-    split_size_ = TextBox();
-    split_size_.Header(box_value(L"Split size (MB)"));
-    split_size_.PlaceholderText(L"ZIP only");
-    split_size_.Width(140);
-    options.Children().Append(format_);
-    options.Children().Append(password_);
-    options.Children().Append(split_size_);
-    content_area.Children().Append(options);
-    items_ = ListView();
-    items_.Height(190);
-    items_.Visibility(Visibility::Collapsed);
-    items_.BorderThickness(thickness(1));
-    items_.BorderBrush(brush(120, 120, 120, 70));
-    items_.CornerRadius(corner_radius(8, 8, 8, 8));
-    content_area.Children().Append(items_);
-    Grid::SetRow(content_area, 1);
-    root.Children().Append(content_area);
-
-    auto footer = StackPanel();
-    footer.Orientation(Orientation::Horizontal);
-    footer.HorizontalAlignment(HorizontalAlignment::Stretch);
-    footer.Spacing(8);
-    status_ = TextBlock();
-    status_.Text(L"Ready");
-    status_.VerticalAlignment(VerticalAlignment::Center);
-    status_.FontFamily(Media::FontFamily(L"Segoe UI Variable Text"));
-    progress_ = ProgressBar();
-    progress_.Width(180);
-    progress_.Height(4);
-    progress_.Visibility(Visibility::Collapsed);
-    progress_.VerticalAlignment(VerticalAlignment::Center);
-    progress_.Margin(thickness(0, 0, 16, 0));
-    extract_ = Button();
-    extract_.Content(box_value(L"Extract"));
-    extract_.Margin(thickness(8, 0, 0, 0));
-    extract_.IsEnabled(false);
-    compress_ = Button();
-    compress_.Content(box_value(L"Compress"));
-    compress_.Margin(thickness(8, 0, 0, 0));
-    compress_.IsEnabled(false);
+    open_.Click([this](auto&&, auto&&) { PickFiles(true, false); });
+    read_archive_.Click([this](auto&&, auto&&) { LoadArchivePreview(); });
+    add_files_.Click([this](auto&&, auto&&) { PickFiles(false, false); });
+    add_folder_.Click([this](auto&&, auto&&) { PickFiles(false, true); });
+    clear_.Click([this](auto&&, auto&&) { ClearSelection(); });
+    choose_destination_.Click([this](auto&&, auto&&) { PickDestination(); });
+    reveal_.Click([this](auto&&, auto&&) { ShowOutput(); });
     extract_.Click(RoutedEventHandler{this, &MainPage::OnExtract});
     compress_.Click(RoutedEventHandler{this, &MainPage::OnCompress});
-    status_.HorizontalAlignment(HorizontalAlignment::Stretch);
-    footer.Children().Append(status_);
-    footer.Children().Append(progress_);
-    footer.Children().Append(extract_);
-    footer.Children().Append(compress_);
-    Grid::SetRow(footer, 2);
-    root.Children().Append(footer);
+    cancel_.Click(RoutedEventHandler{this, &MainPage::OnCancel});
+    format_.SelectionChanged(SelectionChangedEventHandler{this, &MainPage::OnFormatChanged});
+    theme_.SelectionChanged([this](auto&&, auto&&) {
+        RequestedTheme(theme_.SelectedIndex() == 1   ? ElementTheme::Light
+                       : theme_.SelectedIndex() == 2 ? ElementTheme::Dark
+                                                     : ElementTheme::Default);
+    });
+    ActualThemeChanged([this](auto&&, auto&&) {
+        SetStatus(status_.Text(), status_error_, status_detail_);
+        UpdateCaptionTheme();
+    });
+    drop_zone_.DragOver(DragEventHandler{this, &MainPage::HandleDragOver});
+    drop_zone_.DragLeave([this](auto&&, auto&&) { drop_zone_.Opacity(1); });
+    drop_zone_.Drop(DragEventHandler{this, &MainPage::HandleDrop});
+    workspace_.SizeChanged(
+        [this](auto&&, SizeChangedEventArgs const& args) { UpdateResponsiveLayout(args.NewSize().Width); });
+    workspace_.Loaded([this](auto&&, auto&&) { (extract_mode_ ? open_ : add_files_).Focus(FocusState::Pointer); });
     Content(root);
+    navigation_.SelectedItem(compress_navigation_);
+    RefreshSelection();
+    SetBusy(false);
 }
 
-void MainPage::SetStatus(hstring const& text, bool error) {
+void MainPage::UpdateResponsiveLayout(double width) {
+    const auto compact = width < 560;
+    name_format_.RowSpacing(compact ? 10 : 0);
+    Grid::SetColumn(archive_name_, compact ? 1 : 2);
+    Grid::SetRow(archive_name_, compact ? 1 : 0);
+    Grid::SetColumnSpan(archive_name_, compact ? 3 : 1);
+    items_.Height(std::clamp(static_cast<double>(items_.Items().Size()) * 32 + 8, 40.0, 136.0));
+}
+
+void MainPage::InitializeWindow(Window const& window, std::uintptr_t handle) {
+    window_handle_ = handle;
+    title_bar_chrome_ = window.AppWindow().TitleBar();
+    window.SetTitleBar(title_bar_);
+    const auto transparent = Windows::UI::Color{0, 0, 0, 0};
+    title_bar_chrome_.ButtonBackgroundColor(transparent);
+    title_bar_chrome_.ButtonInactiveBackgroundColor(transparent);
+    UpdateCaptionTheme();
+}
+
+void MainPage::UpdateCaptionTheme() {
+    if (!title_bar_chrome_)
+        return;
+    title_bar_chrome_.PreferredTheme(ActualTheme() == ElementTheme::Dark
+                                         ? Microsoft::UI::Windowing::TitleBarTheme::Dark
+                                         : Microsoft::UI::Windowing::TitleBarTheme::Light);
+    const auto dark = ActualTheme() == ElementTheme::Dark;
+    const auto foreground = dark ? Windows::UI::Color{255, 255, 255, 255} : Windows::UI::Color{255, 26, 26, 26};
+    title_bar_chrome_.ButtonForegroundColor(foreground);
+    title_bar_chrome_.ButtonHoverForegroundColor(foreground);
+    title_bar_chrome_.ButtonPressedForegroundColor(foreground);
+    title_bar_chrome_.ButtonInactiveForegroundColor(dark ? Windows::UI::Color{255, 153, 153, 153}
+                                                         : Windows::UI::Color{255, 110, 110, 110});
+    title_bar_chrome_.ButtonHoverBackgroundColor(dark ? Windows::UI::Color{18, 255, 255, 255}
+                                                      : Windows::UI::Color{9, 0, 0, 0});
+    title_bar_chrome_.ButtonPressedBackgroundColor(dark ? Windows::UI::Color{12, 255, 255, 255}
+                                                        : Windows::UI::Color{15, 0, 0, 0});
+}
+
+void MainPage::PrepareOptionsTransition() {
+    if (collapse_scroll_target_)
+        workspace_scroll_.ChangeView(nullptr, workspace_scroll_.VerticalOffset(), nullptr, true);
+    collapse_scroll_target_.reset();
+    reveal_options_ = options_.IsExpanded();
+    if (reveal_options_) {
+        collapsing_options_height_ = 0;
+        body_.MinHeight(0);
+    } else {
+        // Retain the old scroll extent until the animated return reaches a valid offset.
+        collapsing_options_height_ = options_.ActualHeight();
+        body_.MinHeight(body_.ActualHeight());
+    }
+}
+
+void MainPage::UpdateOptionsViewport(SizeChangedEventArgs const& args) {
+    if (reveal_options_ && options_.IsExpanded() && args.NewSize().Height > args.PreviousSize().Height) {
+        reveal_options_ = false;
+        BringIntoViewOptions request;
+        request.AnimationDesired(Windows::UI::ViewManagement::UISettings().AnimationsEnabled());
+        options_.StartBringIntoView(request);
+    } else if (!options_.IsExpanded() && collapsing_options_height_ > args.NewSize().Height) {
+        const auto content_height = body_.MinHeight() - (collapsing_options_height_ - args.NewSize().Height);
+        collapsing_options_height_ = 0;
+        const auto target = std::min(workspace_scroll_.VerticalOffset(),
+                                     std::max(0.0, content_height - workspace_scroll_.ViewportHeight()));
+        collapse_scroll_target_ = target;
+        if (std::abs(workspace_scroll_.VerticalOffset() - target) < 0.5 ||
+            !workspace_scroll_.ChangeView(nullptr, target, nullptr,
+                                          !Windows::UI::ViewManagement::UISettings().AnimationsEnabled())) {
+            collapse_scroll_target_.reset();
+            body_.MinHeight(0);
+        }
+    }
+}
+
+bool MainPage::Busy() const {
+    return busy_;
+}
+
+void MainPage::RequestClose(std::function<void()> close) {
+    close_when_idle_ = std::move(close);
+    if (busy_)
+        OnCancel(nullptr, nullptr);
+    else if (close_when_idle_)
+        std::exchange(close_when_idle_, {})();
+}
+
+void MainPage::SetStatus(hstring const& text, bool error, hstring const& detail) {
+    status_error_ = error;
     status_.Text(text);
-    status_.Foreground(error ? brush(196, 43, 28) : brush(100, 100, 100));
+    status_detail_ = detail.empty() ? text : detail;
+    ToolTipService::SetToolTip(status_, box_value(status_detail_));
+    if (error) {
+        status_.Foreground(SolidColorBrush(ActualTheme() == ElementTheme::Dark ? Windows::UI::Color{255, 255, 153, 164}
+                                                                               : Windows::UI::Color{255, 196, 43, 28}));
+        status_.Opacity(1);
+    } else {
+        status_.ClearValue(TextBlock::ForegroundProperty());
+        status_.Opacity(0.75);
+    }
+}
+
+void MainPage::SetFailure(std::string const& message, std::optional<unfurl::ArchiveFailure::Code> code) {
+    const auto translated = hstring(unfurl::localization::error_message(message, code));
+    SetStatus(translated, true, translated + L"\n\n原始错误：" + from_utf8(message));
 }
 
 void MainPage::SetBusy(bool busy) {
-    progress_.Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
-    extract_.IsEnabled(!busy && !selected_archive_.empty());
-    compress_.IsEnabled(!busy && !selected_paths_.empty() && selected_archive_.empty());
+    busy_ = busy;
+    const auto extracting = extract_mode_;
+    progress_.IsIndeterminate(busy);
+    progress_.Opacity(busy ? 1 : 0);
+    open_.IsEnabled(!busy);
+    add_files_.IsEnabled(!busy);
+    add_folder_.IsEnabled(!busy);
+    clear_.IsEnabled(!busy && (!selected_archives_.empty() || !selected_paths_.empty()));
+    compress_navigation_.IsEnabled(!busy);
+    extract_navigation_.IsEnabled(!busy);
+    if (const auto settings = navigation_.SettingsItem().try_as<NavigationViewItem>())
+        settings.IsEnabled(!busy);
+    theme_.IsEnabled(!busy);
+    items_.IsEnabled(!busy);
+    select_all_.IsEnabled(!busy && !preview_entries_.empty());
+    read_archive_.IsEnabled(!busy);
+    archive_name_.IsEnabled(!busy);
     format_.IsEnabled(!busy);
-    password_.IsEnabled(!busy);
-    split_size_.IsEnabled(!busy);
+    password_.IsEnabled(!busy && (extracting || format_.SelectedIndex() == 0));
+    split_size_.IsEnabled(!busy && !extracting && format_.SelectedIndex() == 0);
+    choose_destination_.IsEnabled(!busy);
     drop_zone_.IsHitTestVisible(!busy);
+    extract_.Visibility(extracting && !busy ? Visibility::Visible : Visibility::Collapsed);
+    compress_.Visibility(!extracting && !busy ? Visibility::Visible : Visibility::Collapsed);
+    extract_.IsEnabled(!busy && extracting && std::ranges::any_of(entry_selection_, [](bool value) { return value; }));
+    compress_.IsEnabled(!busy && !selected_paths_.empty());
+    cancel_.Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
+    cancel_.IsEnabled(busy && cancellation_ && !cancellation_->load(std::memory_order_relaxed));
+    if (!busy && close_when_idle_)
+        std::exchange(close_when_idle_, {})();
+}
+
+void MainPage::OnFormatChanged(Windows::Foundation::IInspectable const&, SelectionChangedEventArgs const&) {
+    const auto zip = format_.SelectedIndex() == 0;
+    password_.PlaceholderText(extract_mode_ ? L"加密压缩包需要密码" : zip ? L"留空则不加密" : L"仅支持 ZIP");
+    split_size_.PlaceholderText(zip ? L"不分卷" : L"仅支持 ZIP");
+    SetBusy(busy_);
+}
+
+void MainPage::OnCancel(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!cancellation_ || cancellation_->exchange(true, std::memory_order_relaxed))
+        return;
+    cancel_.IsEnabled(false);
+    SetStatus(L"正在取消...");
+}
+
+void MainPage::PickFiles(bool archives, bool folders) {
+    if (busy_)
+        return;
+    try {
+        auto paths = choose_paths(reinterpret_cast<HWND>(window_handle_), folders, archives);
+        if (paths.empty())
+            return;
+        const auto extending = !archives && !selected_paths_.empty();
+        const auto name = archive_name_.Text();
+        const auto password = password_.Password();
+        if (!archives)
+            paths.insert(paths.begin(), selected_paths_.begin(), selected_paths_.end());
+        LoadPaths(std::move(paths), !archives);
+        if (extending) {
+            archive_name_.Text(name);
+            password_.Password(password);
+        }
+    } catch (const hresult_error& error) {
+        SetFailure(to_string(error.message()));
+    } catch (const std::exception& error) {
+        SetFailure(error.what());
+    }
+}
+
+void MainPage::PickDestination() {
+    if (busy_)
+        return;
+    try {
+        auto paths = choose_paths(reinterpret_cast<HWND>(window_handle_), true, false, false);
+        if (paths.empty())
+            return;
+        output_directory_ = paths.front();
+        RefreshDestination();
+    } catch (const hresult_error& error) {
+        SetFailure(to_string(error.message()));
+    }
+}
+
+void MainPage::ShowOutput() {
+    if (last_output_.empty())
+        return;
+    PIDLIST_ABSOLUTE item{};
+    const auto result = SHParseDisplayName(last_output_.c_str(), nullptr, &item, 0, nullptr);
+    if (FAILED(result)) {
+        SetStatus(L"输出文件或文件夹已不可用。", true);
+        return;
+    }
+    const auto opened = SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
+    CoTaskMemFree(item);
+    if (FAILED(opened))
+        SetStatus(L"文件资源管理器无法打开输出位置。", true);
+}
+
+void MainPage::ClearSelection() {
+    if (busy_)
+        return;
+    ++operation_id_;
+    selected_paths_.clear();
+    selected_archives_.clear();
+    preview_entries_.clear();
+    entry_selection_.clear();
+    output_directory_.clear();
+    last_output_.clear();
+    updating_selection_ = true;
+    items_.Items().Clear();
+    updating_selection_ = false;
+    read_archive_.Visibility(Visibility::Collapsed);
+    password_.Password(L"");
+    archive_name_.Text(L"");
+    options_.IsExpanded(false);
+    reveal_.Visibility(Visibility::Collapsed);
+    RefreshSelection();
+    SetStatus(L"就绪");
+    SetBusy(false);
+}
+
+void MainPage::RefreshSelection() {
+    const auto extracting = extract_mode_;
+    const auto& paths = extracting ? selected_archives_ : selected_paths_;
+    items_.SelectionMode(extracting ? ListViewSelectionMode::Multiple : ListViewSelectionMode::None);
+    select_all_.Visibility(extracting ? Visibility::Visible : Visibility::Collapsed);
+    list_header_.ColumnDefinitions().GetAt(0).Width(GridLength{extracting ? 52.0 : 20.0, GridUnitType::Pixel});
+    drop_zone_.MinHeight(paths.empty() ? 104 : 0);
+    selection_title_.Text(to_hstring(paths.size()) + (extracting ? L" 个压缩包" : L" 项"));
+    selection_detail_.Text(paths.empty()       ? L""
+                           : paths.size() == 1 ? hstring(paths.front().filename().wstring())
+                                               : to_hstring(paths.size()) + L" 个压缩包");
+    selection_detail_.Visibility(extracting && !paths.empty() ? Visibility::Visible : Visibility::Collapsed);
+    const auto source_path = paths.empty() ? hstring{} : hstring(paths.front().wstring());
+    ToolTipService::SetToolTip(selection_title_, box_value(source_path));
+    ToolTipService::SetToolTip(selection_detail_, box_value(source_path));
+    items_heading_.Text(extracting ? L"压缩包内容" : L"待压缩项目");
+    items_panel_.Visibility(paths.empty() ? Visibility::Collapsed : Visibility::Visible);
+    empty_selection_.Visibility(paths.empty() ? Visibility::Visible : Visibility::Collapsed);
+    empty_selection_text_.Text(extracting ? L"尚未选择压缩包" : L"尚未选择文件或文件夹");
+    workspace_heading_.Text(extracting ? L"解压压缩包" : L"创建压缩包");
+    settings_heading_.Text(L"输出设置");
+    open_.Visibility(extracting ? Visibility::Visible : Visibility::Collapsed);
+    add_files_.Visibility(extracting ? Visibility::Collapsed : Visibility::Visible);
+    add_folder_.Visibility(extracting ? Visibility::Collapsed : Visibility::Visible);
+    name_format_.Visibility(extracting ? Visibility::Collapsed : Visibility::Visible);
+    split_row_.Visibility(extracting ? Visibility::Collapsed : Visibility::Visible);
+    UpdateResponsiveLayout(workspace_.ActualWidth());
+    password_.PlaceholderText(extracting                     ? L"加密压缩包需要密码"
+                              : format_.SelectedIndex() == 0 ? L"留空则不加密"
+                                                             : L"仅支持 ZIP");
+    RefreshDestination();
+    if (extracting)
+        RefreshEntrySelection();
+}
+
+void MainPage::RefreshEntrySelection() {
+    const auto count = std::ranges::count(entry_selection_, true);
+    const auto total = preview_entries_.size();
+    selection_title_.Text(L"已选 " + to_hstring(count) + L" / " + to_hstring(total) + L" 项");
+    select_all_.IsChecked(count == 0                                 ? Windows::Foundation::IReference<bool>(false)
+                          : static_cast<std::size_t>(count) == total ? Windows::Foundation::IReference<bool>(true)
+                                                                     : nullptr);
+    select_all_.IsEnabled(!busy_ && total > 0);
+    extract_.IsEnabled(!busy_ && count > 0);
+}
+
+void MainPage::OnEntrySelectionChanged(SelectionChangedEventArgs const& args) {
+    if (updating_selection_ || !extract_mode_ || preview_entries_.empty())
+        return;
+    const auto index_of = [](auto const& value) {
+        return unbox_value<std::uint32_t>(
+            value.template as<Windows::Foundation::Collections::IMap<hstring, Windows::Foundation::IInspectable>>()
+                .Lookup(L"Index"));
+    };
+    for (const auto& value : args.AddedItems())
+        entry_selection_.at(index_of(value)) = true;
+    for (const auto& value : args.RemovedItems())
+        entry_selection_.at(index_of(value)) = false;
+    const auto native_selection = entry_selection_;
+    const auto descendants = [this](std::size_t parent, auto action) {
+        const auto& folder = preview_entries_[parent];
+        const auto prefix = folder.item.path + "/";
+        for (std::size_t i = 0; i < preview_entries_.size(); ++i) {
+            const auto& entry = preview_entries_[i];
+            if (entry.archive == folder.archive && entry.item.path.starts_with(prefix))
+                action(i);
+        }
+    };
+    if (items_.SelectedItems().Size() != preview_entries_.size()) {
+        for (const auto& value : args.RemovedItems()) {
+            const auto index = index_of(value);
+            if (preview_entries_[index].item.directory)
+                descendants(index, [this](auto child) { entry_selection_[child] = false; });
+        }
+        for (const auto& value : args.AddedItems()) {
+            const auto index = index_of(value);
+            entry_selection_[index] = true;
+            if (preview_entries_[index].item.directory)
+                descendants(index, [this](auto child) { entry_selection_[child] = true; });
+        }
+        // A checked folder always represents its entire subtree, even after individual children change.
+        for (std::size_t i = preview_entries_.size(); i-- > 0;) {
+            if (!preview_entries_[i].item.directory)
+                continue;
+            bool has_children = false;
+            bool all = true;
+            descendants(i, [&](auto child) {
+                has_children = true;
+                all = all && entry_selection_[child];
+            });
+            if (has_children)
+                entry_selection_[i] = all;
+        }
+    }
+    updating_selection_ = true;
+    for (std::size_t i = 0; i < entry_selection_.size();) {
+        if (entry_selection_[i] == native_selection[i]) {
+            ++i;
+            continue;
+        }
+        const auto first = i;
+        const auto selected = entry_selection_[i];
+        while (i < entry_selection_.size() && entry_selection_[i] == selected &&
+               entry_selection_[i] != native_selection[i])
+            ++i;
+        const Data::ItemIndexRange range(static_cast<std::int32_t>(first), static_cast<std::uint32_t>(i - first));
+        if (selected)
+            items_.SelectRange(range);
+        else
+            items_.DeselectRange(range);
+    }
+    updating_selection_ = false;
+    RefreshEntrySelection();
+}
+
+void MainPage::RefreshDestination() {
+    const auto& paths = extract_mode_ ? selected_archives_ : selected_paths_;
+    auto destination = output_directory_;
+    if (destination.empty() && !paths.empty() && !(extract_mode_ && paths.size() > 1))
+        destination = paths.front().parent_path();
+    destination_.Text(destination.empty()
+                          ? (extract_mode_ && paths.size() > 1 ? L"各压缩包所在文件夹" : L"源文件所在文件夹")
+                          : hstring((destination.filename().empty() ? destination : destination.filename()).wstring()));
+    destination_path_.Text(hstring(destination.wstring()));
+    destination_path_.Visibility(destination.empty() ? Visibility::Collapsed : Visibility::Visible);
+    ToolTipService::SetToolTip(choose_destination_,
+                               box_value(destination.empty() ? destination_.Text() : destination_path_.Text()));
+}
+
+void MainPage::AddRow(hstring const& path, std::uint64_t size, bool directory) {
+    Windows::Foundation::Collections::PropertySet row;
+    row.Insert(L"Name", box_value(path));
+    row.Insert(L"Glyph", box_value(directory ? L"\uE8B7" : L"\uE8A5"));
+    row.Insert(L"Size", box_value(directory ? hstring(L"文件夹") : display_size(size)));
+    row.Insert(L"Index", box_value(items_.Items().Size()));
+    items_.Items().Append(row);
 }
 
 void MainPage::HandleDragOver(Windows::Foundation::IInspectable const&, DragEventArgs const& args) {
+    if (busy_ || !args.DataView().Contains(StandardDataFormats::StorageItems())) {
+        args.AcceptedOperation(DataPackageOperation::None);
+        return;
+    }
     args.AcceptedOperation(DataPackageOperation::Copy);
+    drop_zone_.Opacity(0.7);
     args.Handled(true);
 }
 
 fire_and_forget MainPage::HandleDrop(Windows::Foundation::IInspectable const&, DragEventArgs const& args) {
     auto lifetime = get_strong();
     const auto deferral = args.GetDeferral();
+    drop_zone_.Opacity(1);
     try {
-        const auto view = args.DataView();
-        if (!view.Contains(StandardDataFormats::StorageItems())) {
-            deferral.Complete();
-            co_return;
+        if (!busy_ && args.DataView().Contains(StandardDataFormats::StorageItems())) {
+            const auto items = co_await args.DataView().GetStorageItemsAsync();
+            std::vector<std::filesystem::path> paths;
+            for (const auto& item : items)
+                paths.emplace_back(item.Path().c_str());
+            LoadPaths(std::move(paths));
         }
-        const auto items = co_await view.GetStorageItemsAsync();
-        std::vector<std::filesystem::path> paths;
-        for (const auto& item : items) {
-            if (const auto file = item.try_as<StorageFile>()) {
-                paths.emplace_back(file.Path().c_str());
-            } else if (const auto folder = item.try_as<StorageFolder>()) {
-                paths.emplace_back(folder.Path().c_str());
-            }
-        }
-        LoadPaths(std::move(paths));
     } catch (const hresult_error& error) {
-        SetStatus(error.message(), true);
+        SetFailure(to_string(error.message()));
+    } catch (const std::exception& error) {
+        SetFailure(error.what());
     }
     deferral.Complete();
 }
 
-void MainPage::LoadPath(hstring const& path) {
-    LoadPaths({std::filesystem::path(path.c_str())});
-}
-
-void MainPage::LoadPaths(std::vector<std::filesystem::path> paths) {
-    if (paths.empty())
+void MainPage::LoadPaths(std::vector<std::filesystem::path> paths, bool compress) {
+    if (paths.empty() || busy_)
         return;
-    selected_paths_.clear();
-    selected_archive_.clear();
-    password_.Password(L"");
-    items_.Items().Clear();
-    items_.Visibility(Visibility::Collapsed);
-    if (paths.size() == 1 && unfurl::ArchiveEngine::is_archive(paths.front())) {
-        selected_archive_ = paths.front();
-        SetStatus(L"Reading archive…");
-        SetBusy(true);
-        const auto source = selected_archive_;
-        std::thread([lifetime = get_strong(), source] {
-            try {
-                const auto preview = unfurl::ArchiveEngine::preview(source);
-                lifetime->dispatcher_.TryEnqueue([lifetime, preview] {
-                    lifetime->items_.Visibility(Visibility::Visible);
-                    for (const auto& item : preview.items) {
-                        auto row = TextBlock();
-                        row.Text(from_utf8(item.path));
-                        row.FontFamily(Media::FontFamily(L"Segoe UI Variable Text"));
-                        row.Padding(thickness(4));
-                        lifetime->items_.Items().Append(row);
-                    }
-                    const auto count =
-                        std::to_string(preview.items.size()) + (preview.truncated ? "+ items" : " items");
-                    lifetime->SetStatus(preview.encrypted ? from_utf8(count + "; enter password to extract")
-                                                          : from_utf8(count));
-                    lifetime->SetBusy(false);
-                });
-            } catch (const unfurl::ArchiveFailure& error) {
-                lifetime->dispatcher_.TryEnqueue([lifetime, message = std::string(error.what())] {
-                    lifetime->SetStatus(from_utf8(message), true);
-                    lifetime->SetBusy(false);
-                });
+    try {
+        std::vector<std::filesystem::path> unique;
+        for (const auto& path : paths) {
+            auto absolute = std::filesystem::absolute(path).lexically_normal();
+            if (!std::filesystem::exists(absolute))
+                throw std::runtime_error("A selected file or folder no longer exists.");
+            if (std::ranges::find(unique, absolute) == unique.end())
+                unique.push_back(std::move(absolute));
+        }
+        paths = std::move(unique);
+        const auto extracting = !compress && std::ranges::all_of(paths, unfurl::ArchiveEngine::is_archive);
+        extract_mode_ = extracting;
+        navigation_.SelectedItem(extracting ? extract_navigation_ : compress_navigation_);
+        selected_paths_ = extracting ? std::vector<std::filesystem::path>{} : paths;
+        selected_archives_ = extracting ? paths : std::vector<std::filesystem::path>{};
+        preview_entries_.clear();
+        entry_selection_.clear();
+        updating_selection_ = true;
+        items_.Items().Clear();
+        updating_selection_ = false;
+        read_archive_.Visibility(Visibility::Collapsed);
+        last_output_.clear();
+        reveal_.Visibility(Visibility::Collapsed);
+        password_.Password(L"");
+        if (!extracting) {
+            const auto name =
+                paths.size() == 1
+                    ? (std::filesystem::is_directory(paths.front()) ? paths.front().filename() : paths.front().stem())
+                    : std::filesystem::path(L"压缩包");
+            archive_name_.Text(hstring(name.wstring()));
+        }
+        RefreshSelection();
+        if (!extracting) {
+            for (std::size_t i = 0; i < std::min(paths.size(), unfurl::ArchiveEngine::preview_limit); ++i) {
+                const auto folder = std::filesystem::is_directory(paths[i]);
+                AddRow(hstring(paths[i].filename().wstring()), folder ? 0 : std::filesystem::file_size(paths[i]),
+                       folder);
             }
-        }).detach();
-    } else {
-        selected_paths_ = std::move(paths);
-        SetStatus(from_utf8(std::to_string(selected_paths_.size()) + " items ready to compress"));
+            UpdateResponsiveLayout(workspace_.ActualWidth());
+            SetStatus(L"已选择 " + to_hstring(paths.size()) + L" 项，可以开始压缩");
+            SetBusy(false);
+            return;
+        }
+        LoadArchivePreview();
+    } catch (const std::exception& error) {
+        SetFailure(error.what());
         SetBusy(false);
     }
 }
 
-void MainPage::OnExtract(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    if (selected_archive_.empty())
+void MainPage::LoadArchivePreview() {
+    if (busy_ || selected_archives_.empty())
         return;
-    const auto source = selected_archive_;
-    const auto destination = source.parent_path();
-    const auto password = to_string(password_.Password());
+    preview_entries_.clear();
+    entry_selection_.clear();
+    updating_selection_ = true;
+    items_.Items().Clear();
+    updating_selection_ = false;
+    RefreshEntrySelection();
+    const auto operation = ++operation_id_;
+    cancellation_ = std::make_shared<std::atomic_bool>(false);
+    const auto cancellation = cancellation_;
+    read_archive_.Visibility(Visibility::Visible);
+    SetStatus(L"正在读取压缩包...");
     SetBusy(true);
-    SetStatus(L"Extracting…");
-    std::thread([lifetime = get_strong(), source, destination, password] {
+    std::thread([lifetime = get_strong(), sources = selected_archives_, password = to_string(password_.Password()),
+                 cancellation, operation] {
         try {
-            std::optional<std::string_view> passphrase;
-            if (!password.empty())
-                passphrase = password;
-            const auto result = unfurl::ArchiveEngine::extract(source, destination, passphrase);
-            lifetime->dispatcher_.TryEnqueue([lifetime, output = result.output().wstring()] {
-                lifetime->SetStatus(hstring(std::wstring(L"Extracted to ") + output));
+            std::vector<PreviewEntry> entries;
+            bool encrypted = false;
+            for (std::size_t i = 0; i < sources.size(); ++i) {
+                auto preview = unfurl::ArchiveEngine::preview(
+                    sources[i], password.empty() ? std::nullopt : std::optional<std::string_view>(password),
+                    std::numeric_limits<std::uint32_t>::max(),
+                    [cancellation] { return cancellation->load(std::memory_order_relaxed); });
+                encrypted = encrypted || preview.encrypted;
+                std::ranges::sort(preview.items, {}, &unfurl::ArchiveItem::path);
+                for (auto& item : preview.items) {
+                    if (!item.path.empty())
+                        entries.push_back({std::move(item), i});
+                }
+            }
+            lifetime->dispatcher_.TryEnqueue([lifetime, entries = std::move(entries), encrypted, operation,
+                                              cancellation]() mutable {
+                if (lifetime->operation_id_ != operation)
+                    return;
+                if (cancellation->load(std::memory_order_relaxed)) {
+                    lifetime->SetStatus(L"已取消");
+                    lifetime->SetBusy(false);
+                    return;
+                }
+                lifetime->preview_entries_ = std::move(entries);
+                lifetime->updating_selection_ = true;
+                for (const auto& entry : lifetime->preview_entries_) {
+                    const auto name = lifetime->selected_archives_.size() > 1
+                                          ? hstring(lifetime->selected_archives_[entry.archive].filename().wstring()) +
+                                                L" / " + from_utf8(entry.item.path)
+                                          : from_utf8(entry.item.path);
+                    lifetime->AddRow(name, entry.item.size, entry.item.directory);
+                }
+                lifetime->items_.SelectAll();
+                lifetime->entry_selection_.assign(lifetime->preview_entries_.size(), true);
+                lifetime->updating_selection_ = false;
+                lifetime->read_archive_.Visibility(Visibility::Collapsed);
+                lifetime->options_.IsExpanded(encrypted);
+                lifetime->UpdateResponsiveLayout(lifetime->workspace_.ActualWidth());
+                lifetime->RefreshEntrySelection();
+                lifetime->SetStatus(lifetime->preview_entries_.empty() ? L"压缩包为空"
+                                    : encrypted                        ? L"已加密；可以开始解压"
+                                                                       : L"可以开始解压");
                 lifetime->SetBusy(false);
             });
         } catch (const unfurl::ArchiveFailure& error) {
-            lifetime->dispatcher_.TryEnqueue([lifetime, message = std::string(error.what())] {
-                lifetime->SetStatus(from_utf8(message), true);
-                lifetime->SetBusy(false);
-            });
+            if (error.code() == unfurl::ArchiveFailure::Code::password_required) {
+                lifetime->dispatcher_.TryEnqueue([lifetime, operation] {
+                    if (lifetime->operation_id_ == operation)
+                        lifetime->options_.IsExpanded(true);
+                });
+            }
+            lifetime->FinishFailure(error.what(), error.code() == unfurl::ArchiveFailure::Code::cancelled, operation,
+                                    error.code());
+        } catch (const std::exception& error) {
+            lifetime->FinishFailure(error.what(), false, operation);
         }
     }).detach();
 }
 
-void MainPage::OnCompress(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    if (selected_paths_.empty())
-        return;
-    const auto paths = selected_paths_;
-    const auto destination = paths.front().parent_path();
-    const auto name = paths.size() == 1 ? paths.front().stem().string() : "Archive";
-    const auto password = to_string(password_.Password());
-    const auto split_text = to_string(split_size_.Text());
-    std::optional<std::uint64_t> split_size;
-    if (!split_text.empty()) {
-        try {
-            std::size_t consumed = 0;
-            constexpr auto megabyte = std::uint64_t{1024 * 1024};
-            const auto megabytes = std::stoull(split_text, &consumed);
-            if (consumed != split_text.size() || megabytes == 0 ||
-                megabytes > std::numeric_limits<std::uint64_t>::max() / megabyte) {
-                throw std::invalid_argument("invalid split size");
-            }
-            split_size = megabytes * megabyte;
-        } catch (const std::exception&) {
-            SetStatus(L"Split size must be a positive number of megabytes.", true);
+void MainPage::FinishFailure(std::string message, bool cancelled, std::uint64_t operation,
+                             std::optional<unfurl::ArchiveFailure::Code> code) {
+    dispatcher_.TryEnqueue([lifetime = get_strong(), message = std::move(message), cancelled, operation, code] {
+        if (lifetime->operation_id_ != operation)
             return;
-        }
-    }
-    unfurl::CompressionOptions options;
-    options.format = format_from_index(format_.SelectedIndex());
-    options.password = password;
-    options.split_size = split_size;
+        if (cancelled)
+            lifetime->SetStatus(L"已取消");
+        else
+            lifetime->SetFailure(message, code);
+        lifetime->SetBusy(false);
+    });
+}
+
+void MainPage::StartArchiveTask(ArchiveTask task, bool extracting) {
+    const auto operation = ++operation_id_;
+    cancellation_ = std::make_shared<std::atomic_bool>(false);
+    const auto cancellation = cancellation_;
+    reveal_.Visibility(Visibility::Collapsed);
+    SetStatus(extracting ? L"正在解压..." : L"正在压缩...");
     SetBusy(true);
-    SetStatus(L"Compressing…");
-    std::thread([lifetime = get_strong(), paths, destination, name, options] {
+    std::thread([lifetime = get_strong(), task = std::move(task), extracting, cancellation, operation] {
         try {
-            const auto result = unfurl::ArchiveEngine::compress(paths, destination, name, options);
-            lifetime->dispatcher_.TryEnqueue([lifetime, output = result.output().wstring()] {
-                lifetime->SetStatus(hstring(std::wstring(L"Created ") + output));
+            auto last_progress = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+            const auto result = task(
+                [cancellation] { return cancellation->load(std::memory_order_relaxed); },
+                [lifetime, cancellation, operation, extracting, &last_progress](const unfurl::ArchiveUpdate& update) {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (cancellation->load(std::memory_order_relaxed) ||
+                        now - last_progress < std::chrono::milliseconds(100))
+                        return;
+                    last_progress = now;
+                    lifetime->dispatcher_.TryEnqueue(
+                        [lifetime, cancellation, operation, extracting, path = update.path, bytes = update.bytes] {
+                            if (lifetime->operation_id_ != operation || cancellation->load(std::memory_order_relaxed))
+                                return;
+                            lifetime->SetStatus((extracting ? hstring(L"正在解压：") : hstring(L"正在压缩：")) +
+                                                from_utf8(path) + L"；" + display_size(bytes));
+                        });
+                });
+            lifetime->dispatcher_.TryEnqueue([lifetime, result, extracting, operation] {
+                if (lifetime->operation_id_ != operation)
+                    return;
+                lifetime->last_output_ = result.output();
+                lifetime->reveal_.Visibility(Visibility::Visible);
+                const auto output = extracting && result.outputs.size() > 1
+                                        ? to_hstring(result.outputs.size()) + L" 个压缩包"
+                                        : hstring(result.output().filename().wstring());
+                const auto suffix = !extracting && result.outputs.size() > 1
+                                        ? L"；共 " + to_hstring(result.outputs.size()) + L" 个分卷"
+                                        : L"；共 " + to_hstring(result.entries) + L" 项";
+                lifetime->SetStatus((extracting ? hstring(L"已解压：") : hstring(L"已创建：")) + output + suffix);
                 lifetime->SetBusy(false);
             });
         } catch (const unfurl::ArchiveFailure& error) {
-            lifetime->dispatcher_.TryEnqueue([lifetime, message = std::string(error.what())] {
-                lifetime->SetStatus(from_utf8(message), true);
-                lifetime->SetBusy(false);
-            });
+            lifetime->FinishFailure(error.what(), error.code() == unfurl::ArchiveFailure::Code::cancelled, operation,
+                                    error.code());
+        } catch (const std::exception& error) {
+            lifetime->FinishFailure(error.what(), false, operation);
         }
     }).detach();
+}
+
+void MainPage::OnExtract(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (busy_ || !std::ranges::any_of(entry_selection_, [](bool value) { return value; }))
+        return;
+    std::vector<std::vector<std::string>> selections(selected_archives_.size());
+    std::vector<std::size_t> counts(selected_archives_.size());
+    for (std::size_t i = 0; i < preview_entries_.size(); ++i) {
+        const auto& entry = preview_entries_[i];
+        ++counts[entry.archive];
+        if (entry_selection_[i])
+            selections[entry.archive].push_back(entry.item.path);
+    }
+    StartArchiveTask(
+        [sources = selected_archives_, destination = output_directory_, selections = std::move(selections),
+         counts = std::move(counts),
+         password = to_string(password_.Password())](const auto& cancelled, const auto& progress) {
+            unfurl::ArchiveResult total;
+            for (std::size_t i = 0; i < sources.size(); ++i) {
+                if (selections[i].empty())
+                    continue;
+                const auto& source = sources[i];
+                const auto selection = selections[i].size() == counts[i]
+                                           ? std::nullopt
+                                           : std::optional<std::vector<std::string>>(selections[i]);
+                const auto result = unfurl::ArchiveEngine::extract(
+                    source, destination.empty() ? source.parent_path() : destination,
+                    password.empty() ? std::nullopt : std::optional<std::string_view>(password), cancelled, progress,
+                    selection);
+                total.outputs.insert(total.outputs.end(), result.outputs.begin(), result.outputs.end());
+                total.entries += result.entries;
+                total.bytes += result.bytes;
+            }
+            return total;
+        },
+        true);
+}
+
+void MainPage::OnCompress(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (busy_ || selected_paths_.empty())
+        return;
+    unfurl::CompressionOptions options;
+    options.format = format_from_index(format_.SelectedIndex());
+    if (options.format == unfurl::ArchiveFormat::zip) {
+        options.password = to_string(password_.Password());
+        const auto text = to_string(split_size_.Text());
+        if (!text.empty()) {
+            std::uint64_t megabytes{};
+            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), megabytes);
+            constexpr auto megabyte = std::uint64_t{1024 * 1024};
+            if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || megabytes == 0 ||
+                megabytes > std::numeric_limits<std::uint64_t>::max() / megabyte) {
+                SetStatus(L"分卷大小必须为正整数，单位为 MiB。", true);
+                split_size_.Focus(FocusState::Programmatic);
+                return;
+            }
+            options.split_size = megabytes * megabyte;
+        }
+    }
+    const auto destination = output_directory_.empty() ? selected_paths_.front().parent_path() : output_directory_;
+    StartArchiveTask(
+        [sources = selected_paths_, destination,
+         name = to_string(archive_name_.Text().empty() ? hstring(L"压缩包") : archive_name_.Text()),
+         options](const auto& cancelled, const auto& progress) {
+            return unfurl::ArchiveEngine::compress(sources, destination, name, options, cancelled, progress);
+        },
+        false);
 }
 
 } // namespace winrt::Unfurl

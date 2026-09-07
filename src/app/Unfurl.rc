@@ -1,3 +1,33 @@
 #include <windows.h>
 
 1 RT_MANIFEST "Unfurl.manifest"
+1 ICON "Unfurl.ico"
+2 RCDATA "MainPage.xaml"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Unfurl Project"
+            VALUE "FileDescription", "Native Windows archive workspace"
+            VALUE "FileVersion", "0.1.0.0"
+            VALUE "InternalName", "Unfurl.exe"
+            VALUE "OriginalFilename", "Unfurl.exe"
+            VALUE "ProductName", "Unfurl"
+            VALUE "ProductVersion", "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

@@ -1,17 +1,88 @@
 Windows Registry Editor Version 5.00
 
-; Per-user Explorer integration for unpackaged development builds.
+; Per-user Explorer integration for unpackaged builds.
 ; Replace the path below with the installed Unfurl.exe location.
-[HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Extract]
-@="Extract with Unfurl"
-"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe"
 
-[HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Extract\command]
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.7z\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.7z\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.rar\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.rar\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tar\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tar\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.gz\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.gz\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.bz2\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.bz2\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.xz\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.xz\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zst\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zst\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tgz\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tgz\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tbz2\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tbz2\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.txz\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.txz\shell\Unfurl.Extract\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.001\shell\Unfurl.Extract]
+@="Extract with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.001\shell\Unfurl.Extract\command]
 @="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
 
 [HKEY_CURRENT_USER\Software\Classes\Directory\shell\Unfurl.Compress]
 @="Compress with Unfurl"
-"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe"
-
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
 [HKEY_CURRENT_USER\Software\Classes\Directory\shell\Unfurl.Compress\command]
-@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" \"%1\""
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" --compress \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Compress]
+@="Compress with Unfurl"
+"Icon"="C:\\Program Files\\Unfurl\\Unfurl.exe,0"
+[HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Compress\command]
+@="\"C:\\Program Files\\Unfurl\\Unfurl.exe\" --compress \"%1\""

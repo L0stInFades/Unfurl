@@ -1,4 +1,19 @@
 Windows Registry Editor Version 5.00
 
-[-HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.7z\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.rar\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tar\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.gz\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.bz2\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.xz\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zst\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tgz\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.tbz2\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.txz\shell\Unfurl.Extract]
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.001\shell\Unfurl.Extract]
 [-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Unfurl.Compress]
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Compress]
+
+; Remove entries made by the older wildcard template.
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Unfurl.Extract]

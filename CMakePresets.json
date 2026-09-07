@@ -9,6 +9,7 @@
       "binaryDir": "${sourceDir}/build/windows-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "UNFURL_BUILD_APP": "ON",
         "UNFURL_BUILD_TESTS": "OFF",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
@@ -23,6 +24,7 @@
       "binaryDir": "${sourceDir}/build/core-tests",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "UNFURL_BUILD_APP": "OFF",
         "UNFURL_BUILD_TESTS": "ON",
         "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",

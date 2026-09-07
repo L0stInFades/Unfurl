@@ -61,7 +61,7 @@ struct CompressionOptions {
 };
 
 class ArchiveFailure final : public std::runtime_error {
-public:
+  public:
     enum class Code {
         invalid_input,
         unsupported_format,
@@ -74,12 +74,12 @@ public:
     ArchiveFailure(Code code, std::string message);
     [[nodiscard]] Code code() const noexcept;
 
-private:
+  private:
     Code code_;
 };
 
 class ArchiveEngine final {
-public:
+  public:
     using ProgressCallback = std::function<void(const ArchiveUpdate&)>;
 
     static constexpr std::size_t preview_limit = 250;
@@ -89,26 +89,23 @@ public:
     [[nodiscard]] static std::string safe_relative_path(std::string_view value);
     [[nodiscard]] static ArchiveFormat format_for_path(const std::filesystem::path& path);
 
-    [[nodiscard]] static ArchivePreview preview(
-        const std::filesystem::path& source,
-        std::optional<std::string_view> password = std::nullopt,
-        std::size_t limit = preview_limit,
-        const std::function<bool()>& cancelled = {});
+    [[nodiscard]] static ArchivePreview preview(const std::filesystem::path& source,
+                                                std::optional<std::string_view> password = std::nullopt,
+                                                std::size_t limit = preview_limit,
+                                                const std::function<bool()>& cancelled = {});
 
     [[nodiscard]] static ArchiveResult extract(
-        const std::filesystem::path& source,
-        const std::filesystem::path& destination,
-        std::optional<std::string_view> password = std::nullopt,
-        const std::function<bool()>& cancelled = {},
-        const ProgressCallback& progress = {});
+        const std::filesystem::path& source, const std::filesystem::path& destination,
+        std::optional<std::string_view> password = std::nullopt, const std::function<bool()>& cancelled = {},
+        const ProgressCallback& progress = {},
+        // nullopt extracts everything; selected directories include their descendants.
+        const std::optional<std::vector<std::string>>& selected_paths = std::nullopt);
 
-    [[nodiscard]] static ArchiveResult compress(
-        const std::vector<std::filesystem::path>& sources,
-        const std::filesystem::path& destination,
-        std::string_view name,
-        const CompressionOptions& options = {},
-        const std::function<bool()>& cancelled = {},
-        const ProgressCallback& progress = {});
+    [[nodiscard]] static ArchiveResult compress(const std::vector<std::filesystem::path>& sources,
+                                                const std::filesystem::path& destination, std::string_view name,
+                                                const CompressionOptions& options = {},
+                                                const std::function<bool()>& cancelled = {},
+                                                const ProgressCallback& progress = {});
 };
 
 } // namespace unfurl

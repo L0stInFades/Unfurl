@@ -17,5 +17,11 @@ for ($index = 0; $index -lt $Samples; $index++) {
     $start.Stop()
     $workingSet = if ($process.HasExited) { 0 } else { $process.WorkingSet64 }
     [pscustomobject]@{ Sample = $index + 1; FirstWindowMs = $start.Elapsed.TotalMilliseconds; WorkingSetMiB = [math]::Round($workingSet / 1MB, 1) }
-    if (-not $process.HasExited) { $process.CloseMainWindow() | Out-Null; $process.WaitForExit(2000) }
+    if (-not $process.HasExited) {
+        $process.CloseMainWindow() | Out-Null
+        if (-not $process.WaitForExit(2000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            $process.WaitForExit(1000) | Out-Null
+        }
+    }
 }

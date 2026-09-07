@@ -1,7 +1,11 @@
 /build/
+/vcpkg_installed/
 /.cache/
 /artifacts/
 /.vs/
 *.user
 *.suo
 *.VC.db
+*.pfx
+*.p12
+*.key
