@@ -13,7 +13,6 @@ jobs:
       - uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/.vcpkg'
-          vcpkgJsonIgnores: '**/vcpkg-configuration.json'
       - name: Configure core tests
         run: cmake --preset core-tests -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg
       - name: Build core tests

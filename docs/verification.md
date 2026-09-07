@@ -39,3 +39,17 @@ The screenshot utility captures screen pixels without resizing the image. Visual
 ## Coverage limits
 
 Only one physical display and 150% scaling were available. Moving between displays with different DPI, other scaling settings, and a clean-machine runtime installation still need separate hardware or VM checks. Explorer integration scripts are syntax-checked; local UI verification does not install registry entries. The portable application is unpackaged and unsigned.
+
+## MSIX and automatic updates
+
+The release pipeline validates the MSIX manifest with the Windows SDK MakeAppx tool, signs with SHA-256, adds an RFC 3161 timestamp, and checks the certificate, Microsoft framework signatures, package/feed identities, dependency versions, stable and versioned URLs, and every asset's SHA-256 with `eng/verify-release.ps1`.
+
+On Windows 11 x64, a signed `0.0.9.0` fixture was installed through an App Installer feed served over HTTP with byte-range support. `eng/inspect-update.ps1` confirmed enrollment and `NoUpdates`. Replacing the feed with `0.1.0.0` changed the Windows `Package.CheckUpdateAvailabilityAsync` result to `Available`. Starting the app through its Start menu identity triggered Windows to stage the update; deployment event 638 confirmed the running application was not terminated. Closing and relaunching upgraded the installed package to `0.1.0.0`, after which the API reported `NoUpdates` again. No manual `Add-AppxPackage` update or force-close option was used for that upgrade.
+
+The installed app loaded WinUI from the declared Windows App Runtime framework and its C++ DLLs from the VCLibs UWPDesktop framework. The local machine already had those frameworks; dependency installation on a clean machine and the full eight-hour background schedule remain separate environment checks.
+
+Run the Windows update diagnostic using Windows PowerShell 5.1 (its WinRT projection is not available in PowerShell 7):
+
+```powershell
+powershell.exe -NoProfile -File eng/inspect-update.ps1 -ExpectedAvailability NoUpdates
+```

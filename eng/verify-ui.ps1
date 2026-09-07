@@ -208,6 +208,7 @@ function Verify-WindowChrome {
     $titleX = [int]($title.Left + $title.Width / 2)
     $titleY = [int]($title.Top + $title.Height / 2)
     [UnfurlUiInput]::Click($titleX, $titleY)
+    Start-Sleep -Milliseconds 100
     [UnfurlUiInput]::Click($titleX, $titleY)
     Start-Sleep -Milliseconds 400
     if ($pattern.Current.WindowVisualState -ne [System.Windows.Automation.WindowVisualState]::Normal) {
