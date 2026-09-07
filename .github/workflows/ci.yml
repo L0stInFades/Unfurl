@@ -63,7 +63,8 @@ jobs:
         env:
           CC: clang
           CXX: clang++
-        run: cmake --preset core-tests -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg -DVCPKG_TARGET_TRIPLET=x64-linux
+        # clang-tidy uses the compile database before a build can generate module maps.
+        run: cmake --preset core-tests -DVCPKG_ROOT=${{ github.workspace }}/.vcpkg -DVCPKG_TARGET_TRIPLET=x64-linux -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
       - name: Run clang-tidy
         run: clang-tidy -p build/core-tests src/core/archive_engine.cpp --quiet
 
