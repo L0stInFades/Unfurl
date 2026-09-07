@@ -76,7 +76,8 @@
                     </DataTemplate>
                   </ListView.ItemTemplate>
                   <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem">
+                    <!-- Keep WinUI's checkbox fills, theme states, and keyboard focus visuals. -->
+                    <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                       <Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="MinHeight" Value="32" /><Setter Property="Padding" Value="12,4" />
                     </Style>
                   </ListView.ItemContainerStyle>

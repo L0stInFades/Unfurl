@@ -116,6 +116,18 @@ function Select-ArchiveItem([string]$Name, [bool]$Selected = $true) {
     $container = [System.Windows.Automation.ItemContainerPattern]$list.GetCurrentPattern(
         [System.Windows.Automation.ItemContainerPattern]::Pattern)
     $item = $container.FindItemByProperty($null, [System.Windows.Automation.AutomationElement]::NameProperty, $Name)
+    if (-not $item) {
+        # Names assigned to realized containers are unavailable on off-screen WinUI peers.
+        $scroll = [System.Windows.Automation.ScrollPattern]$list.GetCurrentPattern(
+            [System.Windows.Automation.ScrollPattern]::Pattern)
+        $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 0)
+        for ($attempt = 0; $attempt -lt 300; $attempt++) {
+            Start-Sleep -Milliseconds 75
+            $item = $container.FindItemByProperty($null, [System.Windows.Automation.AutomationElement]::NameProperty, $Name)
+            if ($item -or -not $scroll.Current.VerticallyScrollable -or $scroll.Current.VerticalScrollPercent -ge 100) { break }
+            $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount, [System.Windows.Automation.ScrollAmount]::LargeIncrement)
+        }
+    }
     if (-not $item) { throw "The archive list is missing $Name." }
     $virtualized = $null
     if ($item.TryGetCurrentPattern([System.Windows.Automation.VirtualizedItemPattern]::Pattern, [ref]$virtualized)) {
@@ -382,6 +394,13 @@ try {
     $script:process = Get-Process -Id $capture.ProcessId
     $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($script:process.MainWindowHandle)
     Wait-Status '*可以开始解压' | Write-Host
+    foreach ($appearance in @(@{ Index = 1; Name = 'light' }, @{ Index = 2; Name = 'dark' })) {
+        Select-Choice 'ThemeChoice' $appearance.Index
+        Snapshot "selection-all-$($appearance.Name).png"
+        Toggle-AllItems
+        Snapshot "selection-none-$($appearance.Name).png"
+        Toggle-AllItems
+    }
     Toggle-AllItems
     if ((Find-Control 'ExtractCommand').Current.IsEnabled) { throw 'An empty entry selection left Extract enabled.' }
     Select-ArchiveItem 'Assets'
@@ -393,6 +412,7 @@ try {
     if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Indeterminate) {
         throw 'Partial selection is not reflected in the select-all checkbox.'
     }
+    Snapshot 'partial-selection-dark.png'
     Select-Choice 'ThemeChoice' 1
     $partialOutput = Join-Path $run 'Partial output'
     [System.IO.Directory]::CreateDirectory($partialOutput) | Out-Null
