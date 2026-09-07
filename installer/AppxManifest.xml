@@ -4,7 +4,7 @@
          xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
          IgnorableNamespaces="uap uap10 rescap">
-  <Identity Name="L0stInFades.Unfurl" Publisher="CN=L0stInFades" Version="0.1.0.0" ProcessorArchitecture="x64" />
+  <Identity Name="L0stInFades.Unfurl" Publisher="CN=L0stInFades" Version="0.1.1.0" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Unfurl</DisplayName>
     <PublisherDisplayName>L0stInFades</PublisherDisplayName>

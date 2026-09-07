@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(Unfurl VERSION 0.1.0 LANGUAGES CXX)
+project(Unfurl VERSION 0.1.1 LANGUAGES CXX)
 
 include(CTest)
 option(UNFURL_BUILD_APP "Build the WinUI 3 application" ${WIN32})

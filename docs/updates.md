@@ -58,7 +58,7 @@ git tag $release.Tag
 git push origin main $release.Tag
 $assets = @($release.Assets | ForEach-Object { Join-Path ./artifacts/release $_ })
 gh release create $release.Tag @assets --repo $release.Repository --verify-tag --draft `
-    --title "Unfurl $($release.Tag)" --notes-file ./docs/releases/v0.1.0.md
+    --title "Unfurl $($release.Tag)" --notes-file "./docs/releases/$($release.Tag).md"
 gh release view $release.Tag --repo $release.Repository --json assets,isDraft,targetCommitish
 gh release edit $release.Tag --repo $release.Repository --draft=false --latest
 ```
