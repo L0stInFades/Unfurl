@@ -23,6 +23,7 @@ ctest --test-dir build/core-tests --output-on-failure --timeout 30
 - Reject an invalid split size and disable ZIP-only options for other formats.
 - Read the ZIP with .NET and compare entry names, contents, and modification times.
 - Extract the result through the UI and compare the extracted contents.
+- Capture all, none, and partial archive selections in Light and Dark appearance. Row checkboxes inherit `DefaultListViewItemStyle`, including the accent fill and native interaction states (issue #2).
 - Check System, Light, and Dark appearance and capture normal, wide, compact, and minimum window sizes.
 - Verify the normal window exposes the file commands and output settings without clipping, and wide windows keep the content column bounded.
 - Switch between compression and extraction through the navigation pane and open or close the advanced options.
@@ -35,6 +36,8 @@ ctest --test-dir build/core-tests --output-on-failure --timeout 30
 - Cancel 7Z compression of a 128 MiB fixture, then close during another compression and verify cleanup.
 
 The screenshot utility captures screen pixels without resizing the image. Visual review checks text sharpness, Chinese glyphs, field labels, action placement, and clipping. Window dimensions passed to the script are DIPs, including the native frame.
+
+The September 8, 2026 run passed at 144 DPI after the issue #2 fix. Screenshots under `artifacts/issue-2/ui/20260908-014601` confirm that selected row checkboxes match the header's accent fill in both Light and Dark appearance. The same run verified folder/child selection, partial extraction, selection across two archives with 262 entries, full extraction, and cancellation cleanup. High Contrast rendering still needs an interactive check; the fix inherits WinUI's theme resources without replacing its colors or control template.
 
 ## Coverage limits
 
