@@ -71,7 +71,7 @@ class ArchiveFailure final : public std::runtime_error {
         unsafe_path,
     };
 
-    ArchiveFailure(Code code, std::string message);
+    ArchiveFailure(Code code, const std::string& message);
     [[nodiscard]] Code code() const noexcept;
 
   private:

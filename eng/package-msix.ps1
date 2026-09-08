@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+[CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Fa-f0-9]{40}$')][string]$CertificateThumbprint,
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')][string]$Repository = 'L0stInFades/Unfurl',
@@ -29,7 +30,7 @@ $signtool = Join-Path $sdk.FullName 'x64\signtool.exe'
 $portable = Join-Path $artifactRoot 'Unfurl'
 if (-not $Version) { $Version = [version](Get-Item (Join-Path $portable 'Unfurl.exe')).VersionInfo.FileVersion }
 if ($Version.Revision -lt 0 -or @($Version.Major, $Version.Minor, $Version.Build, $Version.Revision |
-        Where-Object { $_ -gt 65535 }).Count -gt 0) {
+            Where-Object { $_ -gt 65535 }).Count -gt 0) {
     throw 'MSIX requires four version components between 0 and 65535.'
 }
 $tag = 'v' + $Version.ToString(3)
@@ -153,7 +154,10 @@ $updates.AppendChild($appInstaller.CreateElement('AutomaticBackgroundTask', $roo
 $root.AppendChild($updates) | Out-Null
 Save-Xml $appInstaller (Join-Path $artifactRoot 'Unfurl.appinstaller')
 
-$assetNames = @($msixName, 'Unfurl.appinstaller', 'Unfurl.cer', 'Unfurl-Release.zip') + @($dependencies.AssetName)
+& (Join-Path $PSScriptRoot 'package-setup.ps1') -ReleaseRoot $artifactRoot -PackageBaseUri $PackageBaseUri `
+    -CertificateThumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl
+$setupDependencies = @(Get-Content -LiteralPath (Join-Path $artifactRoot 'setup-dependencies.json') -Raw | ConvertFrom-Json)
+$assetNames = @($msixName, 'Unfurl.appinstaller', 'Unfurl.cer', 'Unfurl-Release.zip', 'UnfurlSetup.exe') + $setupDependencies
 $checksums = foreach ($name in ($assetNames | Sort-Object)) {
     $hash = Get-FileHash -LiteralPath (Join-Path $artifactRoot $name) -Algorithm SHA256
     "$($hash.Hash.ToLowerInvariant())  $name"
@@ -167,4 +171,4 @@ $checksums = foreach ($name in ($assetNames | Sort-Object)) {
     AppInstallerUri = $AppInstallerUri.AbsoluteUri
     Assets = $assetNames + 'SHA256SUMS.txt'
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $artifactRoot 'release.json') -Encoding utf8NoBOM
-Write-Host "Created signed MSIX and App Installer feed in $artifactRoot"
+Write-Information -InformationAction Continue "Created signed MSIX and App Installer feed in $artifactRoot"

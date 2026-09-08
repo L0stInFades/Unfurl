@@ -1,4 +1,5 @@
-[CmdletBinding()]
+#Requires -Version 7.0
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory = $true)]
     [string]$Executable
@@ -17,6 +18,7 @@ $compressCommand = '"' + $executablePath + '" --compress "%1"'
 $extensions = @('.zip', '.7z', '.rar', '.tar', '.gz', '.bz2', '.xz', '.zst', '.tgz', '.tbz2', '.txz', '.001')
 
 function Set-ShellCommand {
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory = $true)][string]$Key,
         [Parameter(Mandatory = $true)][string]$Label,
@@ -24,6 +26,7 @@ function Set-ShellCommand {
         [Parameter(Mandatory = $true)][string]$Icon
     )
 
+    if (-not $PSCmdlet.ShouldProcess($Key, 'Register Unfurl Explorer command')) { return }
     New-Item -Path $Key -Force | Out-Null
     Set-ItemProperty -LiteralPath $Key -Name '(default)' -Value $Label
     New-ItemProperty -LiteralPath $Key -Name 'Icon' -PropertyType String -Value $Icon -Force | Out-Null
@@ -41,4 +44,4 @@ $directoryKey = Join-Path $classes 'Directory\shell\Unfurl.Compress'
 Set-ShellCommand -Key $directoryKey -Label '使用 Unfurl 压缩' -Command $compressCommand -Icon $icon
 $fileKey = Join-Path $classes '*\shell\Unfurl.Compress'
 Set-ShellCommand -Key $fileKey -Label '使用 Unfurl 压缩' -Command $compressCommand -Icon $icon
-Write-Host "Registered Unfurl Explorer commands for the current user."
+if (-not $WhatIfPreference) { Write-Information -InformationAction Continue 'Registered Unfurl Explorer commands for the current user.' }

@@ -55,3 +55,5 @@ Unfurl 是一款适用于 Windows 11 的原生压缩工具，支持预览压缩�
 - [Mica 材质指南](https://learn.microsoft.com/en-us/windows/apps/design/style/mica)
 
 测试环境与覆盖范围见 [验证记录](docs/verification.md)。
+
+也可以只下载 [UnfurlSetup.exe](https://github.com/L0stInFades/Unfurl/releases/latest/download/UnfurlSetup.exe)，正常双击运行。这个独立的 WinUI 3 安装器内嵌公开证书和更新配置，会准备缺少的微软运行组件，仅在信任证书时请求管理员确认，最后打开 Windows 安装窗口，由你确认安装并加入自动更新通道。无需下载或摆放其他文件。

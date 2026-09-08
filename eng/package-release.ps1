@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
     [string]$Output = 'artifacts',
@@ -50,7 +52,7 @@ Copy-Item -LiteralPath (Join-Path $repo 'README.md') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repo 'README.zh-CN.md') -Destination $stage
 $docsStage = Join-Path $stage 'docs'
 New-Item -ItemType Directory -Force -Path $docsStage | Out-Null
-foreach ($file in @('verification.md', 'updates.md')) {
+foreach ($file in @('verification.md', 'updates.md', 'performance.md')) {
     Copy-Item -LiteralPath (Join-Path $repo "docs\$file") -Destination $docsStage
 }
 
@@ -105,13 +107,13 @@ try {
         $relative = [System.IO.Path]::GetRelativePath($stage, $file.FullName).Replace('\', '/')
         $entry = $zipArchive.CreateEntry($relative, [System.IO.Compression.CompressionLevel]::Optimal)
         $entry.LastWriteTime = $fixedTimestamp
-        $input = [System.IO.File]::OpenRead($file.FullName)
+        $inputStream = [System.IO.File]::OpenRead($file.FullName)
         $outputStream = $entry.Open()
         try {
-            $input.CopyTo($outputStream)
+            $inputStream.CopyTo($outputStream)
         } finally {
             $outputStream.Dispose()
-            $input.Dispose()
+            $inputStream.Dispose()
         }
     }
 } finally {
@@ -119,4 +121,4 @@ try {
     $zipStream.Dispose()
 }
 Get-FileHash -LiteralPath $zip -Algorithm SHA256 | Format-List
-Write-Host "Created $zip"
+Write-Information -InformationAction Continue "Created $zip"

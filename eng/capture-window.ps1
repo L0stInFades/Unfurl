@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$Executable = (Join-Path $PSScriptRoot '..\build\windows-release\Unfurl.exe'),
     [string]$Output = (Join-Path $PSScriptRoot '..\artifacts\screenshots\unfurl.png'),

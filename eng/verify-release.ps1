@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+[CmdletBinding()]
 param([string]$Path = (Join-Path $PSScriptRoot '..\artifacts\release'))
 
 $ErrorActionPreference = 'Stop'
@@ -23,7 +24,7 @@ foreach ($line in (Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt')))
     $checksums[$Matches[2]] = $Matches[1]
 }
 foreach ($asset in $release.Assets) {
-    if ($asset -notmatch '^[A-Za-z0-9_.-]+\.(msix|appx|appinstaller|cer|zip|txt)$') {
+    if ($asset -notmatch '^[A-Za-z0-9_.-]+\.(msix|appx|appinstaller|cer|zip|exe|txt)$') {
         throw "Unexpected release asset: $asset"
     }
     $file = Join-Path $root $asset
@@ -35,6 +36,55 @@ foreach ($asset in $release.Assets) {
 $publicCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $root 'Unfurl.cer'))
 if ($publicCertificate.HasPrivateKey -or $publicCertificate.Thumbprint -ne $release.CertificateThumbprint) {
     throw 'The published certificate does not match the release signing identity.'
+}
+if ('UnfurlSetup.exe' -notin $release.Assets) { throw 'The release must include the standalone WinUI 3 installer.' }
+$setup = Join-Path $root 'UnfurlSetup.exe'
+$setupSignature = Get-AuthenticodeSignature -LiteralPath $setup
+if ($setupSignature.Status -ne 'Valid' -or $setupSignature.SignerCertificate.Thumbprint -ne $release.CertificateThumbprint -or
+    -not $setupSignature.TimeStamperCertificate -or (Get-Item $setup).VersionInfo.FileVersion -ne $release.Version) {
+    throw 'Setup must have the release version, trusted release signer and timestamp.'
+}
+if ((Get-Item $setup).Length -ge 1MB) { throw 'The thin installer exceeded its 1 MiB budget.' }
+Add-Type @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class UnfurlSetupResources {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr LoadLibraryExW(string name, IntPtr file, uint flags);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+    [DllImport("kernel32.dll")] static extern IntPtr LockResource(IntPtr resource);
+    [DllImport("kernel32.dll")] static extern uint SizeofResource(IntPtr module, IntPtr resource);
+    [DllImport("kernel32.dll")] static extern bool FreeLibrary(IntPtr module);
+    public static byte[] Read(string path, int id) {
+        var module = LoadLibraryExW(path, IntPtr.Zero, 0x22); // Data only; never execute setup while verifying.
+        if (module == IntPtr.Zero) throw new Win32Exception();
+        try {
+            var info = FindResourceW(module, new IntPtr(id), new IntPtr(10));
+            if (info == IntPtr.Zero) throw new Win32Exception();
+            var pointer = LockResource(LoadResource(module, info));
+            if (pointer == IntPtr.Zero) throw new Win32Exception();
+            var bytes = new byte[SizeofResource(module, info)];
+            Marshal.Copy(pointer, bytes, 0, bytes.Length);
+            return bytes;
+        } finally { FreeLibrary(module); }
+    }
+}
+'@
+foreach ($resource in @(@{Id = 10; File = 'Unfurl.cer' }, @{Id = 12; File = 'Unfurl.appinstaller' })) {
+    $bytes = [UnfurlSetupResources]::Read($setup, $resource.Id)
+    $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+    if ($hash -ne (Get-FileHash -LiteralPath (Join-Path $root $resource.File) -Algorithm SHA256).Hash) {
+        throw "Setup has a different embedded $($resource.File)."
+    }
+}
+foreach ($asset in $release.Assets | Where-Object { $_ -match '^Microsoft.*\.(msix|appx)$' }) {
+    $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $root $asset)
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        throw "Setup dependency has an invalid Microsoft signature: $asset"
+    }
 }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $packages = @($feed.AppInstaller.MainPackage) + @($feed.AppInstaller.Dependencies.Package)
@@ -66,12 +116,12 @@ foreach ($package in $packages) {
         if ($package.LocalName -eq 'MainPackage') {
             foreach ($dependency in $manifest.Package.Dependencies.PackageDependency) {
                 $provided = @($feed.AppInstaller.Dependencies.Package | Where-Object {
-                    $_.Name -ceq $dependency.Name -and $_.Publisher -ceq $dependency.Publisher -and
-                    [version]$_.Version -ge [version]$dependency.MinVersion
-                })
+                        $_.Name -ceq $dependency.Name -and $_.Publisher -ceq $dependency.Publisher -and
+                        [version]$_.Version -ge [version]$dependency.MinVersion
+                    })
                 if ($provided.Count -ne 1) { throw "Missing framework: $($dependency.Name)" }
             }
         }
     } finally { $archive.Dispose() }
 }
-Write-Host "Verified $($release.Tag): trusted signatures, timestamp, identities, dependencies, update policy, URLs and SHA-256."
+Write-Information -InformationAction Continue "Verified $($release.Tag): setup resources and size, trusted signatures, timestamps, identities, dependencies, update policy, URLs and SHA-256."

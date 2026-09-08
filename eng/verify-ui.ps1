@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$Executable = (Join-Path $PSScriptRoot '..\build\windows-release\Unfurl.exe'),
     [string]$Output = (Join-Path $PSScriptRoot '..\artifacts\ui-verification')
@@ -79,7 +81,7 @@ function Invoke-Control([string]$Id) {
         [System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
 }
 
-function Set-Text([string]$Id, [string]$Value) {
+function Invoke-TextInput([string]$Id, [string]$Value) {
     $element = Find-Control $Id
     ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern)).SetValue($Value)
@@ -105,7 +107,7 @@ function Select-Choice([string]$Id, [int]$Index) {
     }
 }
 
-function Toggle-AllItems {
+function Invoke-AllItemsToggle {
     ([System.Windows.Automation.TogglePattern](Find-Control 'SelectAllItems').GetCurrentPattern(
         [System.Windows.Automation.TogglePattern]::Pattern)).Toggle()
     Start-Sleep -Milliseconds 200
@@ -141,14 +143,14 @@ function Select-ArchiveItem([string]$Name, [bool]$Selected = $true) {
     Start-Sleep -Milliseconds 200
 }
 
-function Set-Options([bool]$Expanded) {
+function Invoke-OptionToggle([bool]$Expanded) {
     $pattern = [System.Windows.Automation.ExpandCollapsePattern](Find-Control 'ArchiveOptions').GetCurrentPattern(
         [System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     if ($Expanded) { $pattern.Expand() } else { $pattern.Collapse() }
     Start-Sleep -Milliseconds 650
 }
 
-function Verify-OptionsMotion {
+function Test-OptionsMotion {
     $pattern = [System.Windows.Automation.ExpandCollapsePattern](Find-Control 'ArchiveOptions').GetCurrentPattern(
         [System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     $scroll = [System.Windows.Automation.ScrollPattern](Find-Control 'WorkspaceScroll').GetCurrentPattern(
@@ -178,7 +180,7 @@ function Verify-OptionsMotion {
                     throw "Expanding options did not bring $controlId fully into view."
                 }
             }
-            Snapshot 'options-visible-dark.png'
+            Save-Snapshot 'options-visible-dark.png'
         } elseif ($scroll.Current.VerticallyScrollable) {
             throw 'Collapsing options left unused scroll space in the default window.'
         }
@@ -201,13 +203,13 @@ function Wait-Status([string]$Pattern) {
     throw "Expected status '$Pattern'; received '$status'."
 }
 
-function Snapshot([string]$Name, [int]$Width = 0, [int]$Height = 0) {
+function Save-Snapshot([string]$Name, [int]$Width = 0, [int]$Height = 0) {
     $heading = (Find-Control 'WorkspaceHeading').Current.BoundingRectangle
     [UnfurlUiInput]::Click([int]($heading.Left + $heading.Width / 2), [int]($heading.Top + $heading.Height / 2))
     & (Join-Path $PSScriptRoot 'capture-window.ps1') -ExistingProcessId $script:process.Id -Output (Join-Path $run $Name) -Width $Width -Height $Height | Out-Null
 }
 
-function Verify-WindowChrome {
+function Test-WindowChrome {
     $pattern = [System.Windows.Automation.WindowPattern]$script:window.GetCurrentPattern(
         [System.Windows.Automation.WindowPattern]::Pattern)
     Invoke-Control 'Maximize'
@@ -215,7 +217,7 @@ function Verify-WindowChrome {
     if ($pattern.Current.WindowVisualState -ne [System.Windows.Automation.WindowVisualState]::Maximized) {
         throw 'The native maximize button did not maximize the window.'
     }
-    Snapshot 'maximized-light.png'
+    Save-Snapshot 'maximized-light.png'
     $title = (Find-Control 'WindowTitleBar').Current.BoundingRectangle
     $titleX = [int]($title.Left + $title.Width / 2)
     $titleY = [int]($title.Top + $title.Height / 2)
@@ -253,14 +255,14 @@ function Verify-WindowChrome {
     Start-Sleep -Milliseconds 400
 }
 
-function Stop-App {
+function Invoke-AppClose {
     if ($script:process -and -not $script:process.HasExited) {
         $script:process.CloseMainWindow() | Out-Null
         if (-not $script:process.WaitForExit(5000)) { $script:process.Kill(); $script:process.WaitForExit() }
     }
 }
 
-function Choose-Path([string]$Command, [string]$Title, [string]$Path) {
+function Select-DialogPath([string]$Command, [string]$Title, [string]$Path) {
     (Find-Control $Command).SetFocus()
     [UnfurlUiInput]::Press(0x20)
     $condition = [System.Windows.Automation.AndCondition]::new(
@@ -305,21 +307,21 @@ try {
     foreach ($translation in @{ CompressNavigation = '压缩'; ExtractNavigation = '解压'; WorkspaceHeading = '创建压缩包'; DestinationCommand = '选择保存位置' }.GetEnumerator()) {
         if ((Find-Control $translation.Key).Current.Name -ne $translation.Value) { throw "Unexpected Chinese label for $($translation.Key)." }
     }
-    Verify-OptionsMotion
-    Set-Text 'ArchiveNameBox' '../invalid'
+    Test-OptionsMotion
+    Invoke-TextInput 'ArchiveNameBox' '../invalid'
     Invoke-Control 'CompressCommand'
-    Wait-Status '压缩包名称必须*不能包含路径*' | Write-Host
-    Set-Text 'ArchiveNameBox' 'Project delivery'
-    Set-Options $true
-    Set-Text 'SplitSizeBox' '-1'
+    Wait-Status '压缩包名称必须*不能包含路径*' | Write-Information -InformationAction Continue
+    Invoke-TextInput 'ArchiveNameBox' 'Project delivery'
+    Invoke-OptionToggle $true
+    Invoke-TextInput 'SplitSizeBox' '-1'
     Invoke-Control 'CompressCommand'
-    Wait-Status '分卷大小必须*' | Write-Host
-    Set-Text 'SplitSizeBox' ''
+    Wait-Status '分卷大小必须*' | Write-Information -InformationAction Continue
+    Invoke-TextInput 'SplitSizeBox' ''
     Select-Choice 'FormatComboBox' 1
     if ((Find-Control 'ArchivePasswordBox').Current.IsEnabled) { throw 'Non-ZIP password control must be disabled.' }
     Select-Choice 'FormatComboBox' 0
     Invoke-Control 'CompressCommand'
-    Wait-Status '已创建：*' | Write-Host
+    Wait-Status '已创建：*' | Write-Information -InformationAction Continue
     $archive = Join-Path $inputs 'Project delivery.zip'
     if (-not (Test-Path -LiteralPath $archive)) { throw 'Compress did not create its output.' }
     $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
@@ -335,8 +337,8 @@ try {
             } finally { $reader.Dispose() }
         }
     } finally { $zip.Dispose() }
-    Snapshot 'options-expanded.png'
-    Set-Options $false
+    Save-Snapshot 'options-expanded.png'
+    Invoke-OptionToggle $false
     $viewport = (Find-Control 'WorkspaceScroll').Current.BoundingRectangle
     foreach ($controlId in @('AddFilesCommand', 'ArchiveNameBox', 'FormatComboBox', 'DestinationCommand', 'ArchiveOptions')) {
         $bounds = (Find-Control $controlId).Current.BoundingRectangle
@@ -345,9 +347,9 @@ try {
         }
     }
     Select-Choice 'ThemeChoice' 2
-    Snapshot 'compress-complete-dark.png'
+    Save-Snapshot 'compress-complete-dark.png'
     Select-Choice 'ThemeChoice' 1
-    Snapshot 'compress-complete-light.png'
+    Save-Snapshot 'compress-complete-light.png'
     Select-Navigation 'SettingsNavigation'
     & (Join-Path $PSScriptRoot 'capture-window.ps1') -ExistingProcessId $script:process.Id -Output (Join-Path $run 'settings-light.png') | Out-Null
     & (Join-Path $PSScriptRoot 'capture-window.ps1') -ExistingProcessId $script:process.Id -Output (Join-Path $run 'settings-minimum-light.png') -Width 560 -Height 480 | Out-Null
@@ -355,8 +357,8 @@ try {
     $settingsBounds = $script:window.Current.BoundingRectangle
     if ($themeBounds.Right -gt $settingsBounds.Right) { throw 'The theme selector is clipped in the minimum window.' }
     Select-Navigation 'CompressNavigation'
-    Snapshot 'settings-return-light.png' 960 640
-    Verify-WindowChrome
+    Save-Snapshot -Name 'settings-return-light.png' -Width 960 -Height 640
+    Test-WindowChrome
     $activationWindow = [System.Windows.Forms.Form]::new()
     try {
         $activationWindow.Text = 'Material verification'
@@ -371,37 +373,37 @@ try {
     } finally {
         $activationWindow.Dispose()
     }
-    Snapshot 'wide-light.png' 1400 800
+    Save-Snapshot -Name 'wide-light.png' -Width 1400 -Height 800
     if ((Find-Control 'WorkspaceScroll').Current.BoundingRectangle.Width -gt (797 * $capture.Dpi / 96)) {
         throw 'The content stretches past its maximum reading width.'
     }
-    Snapshot 'compact-light.png' 640 640
-    Snapshot 'minimum-light.png' 560 480
+    Save-Snapshot -Name 'compact-light.png' -Width 640 -Height 640
+    Save-Snapshot -Name 'minimum-light.png' -Width 560 -Height 480
     $scroll = [System.Windows.Automation.ScrollPattern](Find-Control 'WorkspaceScroll').GetCurrentPattern(
         [System.Windows.Automation.ScrollPattern]::Pattern)
     if ($scroll.Current.VerticallyScrollable) {
         $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
     }
-    Snapshot 'minimum-settings-light.png'
+    Save-Snapshot 'minimum-settings-light.png'
     $viewport = (Find-Control 'WorkspaceScroll').Current.BoundingRectangle
     $destinationBounds = (Find-Control 'DestinationCommand').Current.BoundingRectangle
     if ($destinationBounds.Bottom -gt $viewport.Bottom -or $destinationBounds.Top -lt $viewport.Top) {
         throw 'The destination control is outside the scrolled minimum viewport.'
     }
-    Stop-App
+    Invoke-AppClose
 
     $capture = & (Join-Path $PSScriptRoot 'capture-window.ps1') -Executable $Executable -LaunchArguments @($archive) -Output (Join-Path $run 'archive-preview.png') -LeaveOpen
     $script:process = Get-Process -Id $capture.ProcessId
     $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($script:process.MainWindowHandle)
-    Wait-Status '*可以开始解压' | Write-Host
+    Wait-Status '*可以开始解压' | Write-Information -InformationAction Continue
     foreach ($appearance in @(@{ Index = 1; Name = 'light' }, @{ Index = 2; Name = 'dark' })) {
         Select-Choice 'ThemeChoice' $appearance.Index
-        Snapshot "selection-all-$($appearance.Name).png"
-        Toggle-AllItems
-        Snapshot "selection-none-$($appearance.Name).png"
-        Toggle-AllItems
+        Save-Snapshot "selection-all-$($appearance.Name).png"
+        Invoke-AllItemsToggle
+        Save-Snapshot "selection-none-$($appearance.Name).png"
+        Invoke-AllItemsToggle
     }
-    Toggle-AllItems
+    Invoke-AllItemsToggle
     if ((Find-Control 'ExtractCommand').Current.IsEnabled) { throw 'An empty entry selection left Extract enabled.' }
     Select-ArchiveItem 'Assets'
     Select-ArchiveItem 'Assets/Readme.md' $false
@@ -412,24 +414,24 @@ try {
     if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Indeterminate) {
         throw 'Partial selection is not reflected in the select-all checkbox.'
     }
-    Snapshot 'partial-selection-dark.png'
+    Save-Snapshot 'partial-selection-dark.png'
     Select-Choice 'ThemeChoice' 1
     $partialOutput = Join-Path $run 'Partial output'
     [System.IO.Directory]::CreateDirectory($partialOutput) | Out-Null
-    Choose-Path 'DestinationCommand' '选择保存位置' $partialOutput
-    Snapshot 'partial-selection-light.png'
+    Select-DialogPath -Command 'DestinationCommand' -Title '选择保存位置' -Path $partialOutput
+    Save-Snapshot 'partial-selection-light.png'
     Invoke-Control 'ExtractCommand'
-    Wait-Status '已解压：*' | Write-Host
+    Wait-Status '已解压：*' | Write-Information -InformationAction Continue
     $partialFiles = @(Get-ChildItem -LiteralPath $partialOutput -Recurse -File)
     if ($partialFiles.Count -ne 1 -or $partialFiles[0].Name -cne "$unicodeName.txt" -or
         [System.IO.File]::ReadAllText($partialFiles[0].FullName) -cne $fixtures["$unicodeName.txt"]) {
         throw 'Partial extraction wrote omitted files or changed the selected Unicode file.'
     }
-    Toggle-AllItems
+    Invoke-AllItemsToggle
     if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { throw 'Select all did not select the complete archive.' }
-    Choose-Path 'DestinationCommand' '选择保存位置' $inputs
+    Select-DialogPath -Command 'DestinationCommand' -Title '选择保存位置' -Path $inputs
     Invoke-Control 'ExtractCommand'
-    Wait-Status '已解压：*' | Write-Host
+    Wait-Status '已解压：*' | Write-Information -InformationAction Continue
     $extracted = Join-Path $inputs 'Project delivery'
     foreach ($fixture in $fixtures.GetEnumerator()) {
         $path = Join-Path $extracted $fixture.Key
@@ -437,27 +439,27 @@ try {
             throw "Extracted content differs for $($fixture.Key)."
         }
     }
-    Snapshot 'extract-complete-dark.png'
+    Save-Snapshot 'extract-complete-dark.png'
     Invoke-Control 'ClearCommand'
     if ((Find-Control 'ExtractCommand').Current.IsEnabled) { throw 'Clearing the selection left Extract enabled.' }
     Select-Choice 'ThemeChoice' 1
-    Snapshot 'empty-extract-light.png'
+    Save-Snapshot 'empty-extract-light.png'
     Select-Navigation 'CompressNavigation'
     if ((Find-Control 'CompressCommand').Current.IsEnabled) { throw 'An empty compression selection left Compress enabled.' }
-    Snapshot 'empty-light.png'
+    Save-Snapshot 'empty-light.png'
 
-    Choose-Path 'AddFilesCommand' '添加文件' (Join-Path $inputs 'Design review.txt')
-    Wait-Status '*可以开始压缩' | Write-Host
-    Set-Text 'ArchiveNameBox' 'From picker'
-    Choose-Path 'AddFolderCommand' '添加文件夹' (Join-Path $inputs 'Assets')
+    Select-DialogPath -Command 'AddFilesCommand' -Title '添加文件' -Path (Join-Path $inputs 'Design review.txt')
+    Wait-Status '*可以开始压缩' | Write-Information -InformationAction Continue
+    Invoke-TextInput 'ArchiveNameBox' 'From picker'
+    Select-DialogPath -Command 'AddFolderCommand' -Title '添加文件夹' -Path (Join-Path $inputs 'Assets')
     $chosenOutput = Join-Path $run 'Chosen output'
     [System.IO.Directory]::CreateDirectory($chosenOutput) | Out-Null
-    Choose-Path 'DestinationCommand' '选择保存位置' $chosenOutput
+    Select-DialogPath -Command 'DestinationCommand' -Title '选择保存位置' -Path $chosenOutput
     Invoke-Control 'CompressCommand'
-    Wait-Status '已创建：From picker.zip*' | Write-Host
+    Wait-Status '已创建：From picker.zip*' | Write-Information -InformationAction Continue
     if (-not (Test-Path -LiteralPath (Join-Path $chosenOutput 'From picker.zip'))) { throw 'The chosen destination was ignored.' }
-    Snapshot 'picker-compression-light.png'
-    Stop-App
+    Save-Snapshot 'picker-compression-light.png'
+    Invoke-AppClose
 
     $manyArchive = Join-Path $run 'Many entries.zip'
     $otherArchive = Join-Path $run 'Other entries.zip'
@@ -473,17 +475,17 @@ try {
     $capture = & (Join-Path $PSScriptRoot 'capture-window.ps1') -Executable $Executable -LaunchArguments @($manyArchive, $otherArchive) -Output (Join-Path $run 'multiple-archives.png') -LeaveOpen
     $script:process = Get-Process -Id $capture.ProcessId
     $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($script:process.MainWindowHandle)
-    Wait-Status '*可以开始解压' | Write-Host
+    Wait-Status '*可以开始解压' | Write-Information -InformationAction Continue
     if ((Find-Control 'SelectionTitle').Current.Name -ne '已选 262 / 262 项') { throw 'The archive list still truncates entries or ignores additional archives.' }
-    Toggle-AllItems
+    Invoke-AllItemsToggle
     Select-ArchiveItem 'Many entries.zip / item-259.txt'
     Select-ArchiveItem 'Other entries.zip / item-000.txt'
     $multiOutput = Join-Path $run 'Multiple partial output'
     [System.IO.Directory]::CreateDirectory($multiOutput) | Out-Null
-    Choose-Path 'DestinationCommand' '选择保存位置' $multiOutput
-    Snapshot 'multiple-partial-selection.png'
+    Select-DialogPath -Command 'DestinationCommand' -Title '选择保存位置' -Path $multiOutput
+    Save-Snapshot 'multiple-partial-selection.png'
     Invoke-Control 'ExtractCommand'
-    Wait-Status '已解压：2 个压缩包*' | Write-Host
+    Wait-Status '已解压：2 个压缩包*' | Write-Information -InformationAction Continue
     if (@(Get-ChildItem -LiteralPath $multiOutput -File -Recurse).Count -ne 2 -or
         [System.IO.File]::ReadAllText((Join-Path $multiOutput 'Many entries/item-259.txt')) -cne 'Many entry 259' -or
         [System.IO.File]::ReadAllText((Join-Path $multiOutput 'Other entries/item-000.txt')) -cne 'Other entry 0') {
@@ -491,12 +493,12 @@ try {
     }
     $allOutput = Join-Path $run 'All entries output'
     [System.IO.Directory]::CreateDirectory($allOutput) | Out-Null
-    Choose-Path 'DestinationCommand' '选择保存位置' $allOutput
-    Toggle-AllItems
+    Select-DialogPath -Command 'DestinationCommand' -Title '选择保存位置' -Path $allOutput
+    Invoke-AllItemsToggle
     Invoke-Control 'ExtractCommand'
-    Wait-Status '已解压：2 个压缩包*' | Write-Host
+    Wait-Status '已解压：2 个压缩包*' | Write-Information -InformationAction Continue
     if (@(Get-ChildItem -LiteralPath $allOutput -File -Recurse).Count -ne 262) { throw 'Select all omitted archive entries.' }
-    Stop-App
+    Invoke-AppClose
 
     $cancelSource = Join-Path $run 'Cancellation source.bin'
     $stream = [System.IO.File]::Create($cancelSource)
@@ -508,24 +510,24 @@ try {
     $capture = & (Join-Path $PSScriptRoot 'capture-window.ps1') -Executable $Executable -LaunchArguments @('--compress', $cancelSource) -Output (Join-Path $run 'cancellation-ready.png') -LeaveOpen
     $script:process = Get-Process -Id $capture.ProcessId
     $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($script:process.MainWindowHandle)
-    Set-Text 'ArchiveNameBox' 'Cancelled'
+    Invoke-TextInput 'ArchiveNameBox' 'Cancelled'
     Select-Choice 'FormatComboBox' 1
     Invoke-Control 'CompressCommand'
-    Wait-Status '正在压缩：*' | Write-Host
+    Wait-Status '正在压缩：*' | Write-Information -InformationAction Continue
     Invoke-Control 'CancelCommand'
-    Wait-Status '已取消' | Write-Host
+    Wait-Status '已取消' | Write-Information -InformationAction Continue
     if (Test-Path -LiteralPath (Join-Path $run 'Cancelled.7z')) { throw 'Cancellation published an archive.' }
     if (Get-ChildItem -LiteralPath $run -Directory -Filter '.unfurl-stage-*') { throw 'Cancellation left a staging directory.' }
-    Snapshot 'cancelled-dark.png'
-    Set-Text 'ArchiveNameBox' 'Close cancellation'
+    Save-Snapshot 'cancelled-dark.png'
+    Invoke-TextInput 'ArchiveNameBox' 'Close cancellation'
     Invoke-Control 'CompressCommand'
-    Wait-Status '正在压缩：*' | Write-Host
+    Wait-Status '正在压缩：*' | Write-Information -InformationAction Continue
     $script:process.CloseMainWindow() | Out-Null
     if (-not $script:process.WaitForExit(20000)) { throw 'Closing the app did not finish cancellation.' }
     if (Test-Path -LiteralPath (Join-Path $run 'Close cancellation.7z')) { throw 'Closing published a cancelled archive.' }
     if (Get-ChildItem -LiteralPath $run -Directory -Filter '.unfurl-stage-*') { throw 'Closing left a staging directory.' }
-    Write-Host "UI verification passed at $($capture.Dpi) DPI. Screenshots: $run"
+    Write-Information -InformationAction Continue "UI verification passed at $($capture.Dpi) DPI. Screenshots: $run"
 } finally {
-    Stop-App
+    Invoke-AppClose
     if ($cancelSource -and (Test-Path -LiteralPath $cancelSource)) { [System.IO.File]::Delete($cancelSource) }
 }

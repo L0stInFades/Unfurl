@@ -1,8 +1,6 @@
 #include <windows.h>
 
-1 RT_MANIFEST "Unfurl.manifest"
-1 ICON "Unfurl.ico"
-2 RCDATA "MainPage.xaml"
+1 RT_MANIFEST "UnfurlSetup.manifest"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 0,1,1,1
@@ -11,17 +9,16 @@ VS_VERSION_INFO VERSIONINFO
  FILEFLAGS 0
  FILEOS VOS__WINDOWS32
  FILETYPE VFT_APP
- FILESUBTYPE VFT2_UNKNOWN
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "Unfurl Project"
-            VALUE "FileDescription", "Native Windows archive workspace"
+            VALUE "FileDescription", "Unfurl MSIX installer bootstrap"
             VALUE "FileVersion", "0.1.1.1"
-            VALUE "InternalName", "Unfurl.exe"
-            VALUE "OriginalFilename", "Unfurl.exe"
+            VALUE "InternalName", "UnfurlSetup.exe"
+            VALUE "OriginalFilename", "UnfurlSetup.exe"
             VALUE "ProductName", "Unfurl"
             VALUE "ProductVersion", "0.1.1.1"
         END

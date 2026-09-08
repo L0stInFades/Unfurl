@@ -6,9 +6,11 @@ The local verification environment is Windows 11 x64, a 2560 x 1600 display at 1
 
 ## Core checks
 
-Both MSVC Release and MinGW GCC 15.2 Debug builds pass the archive core suite. Release assertions remain enabled in the test executable. The suite checks ZIP, 7Z, TAR.GZ, TAR.BZ2, TAR.XZ, TAR.ZST, encrypted ZIP, Unicode filenames and output paths, modification times, duplicate output names, bounded preview, unsafe paths, and missing split volumes.
+Both MSVC Release and MinGW GCC 16.2 Debug builds pass the archive core suite. Release assertions remain enabled in the test executable. The suite checks ZIP, 7Z, TAR.GZ, TAR.BZ2, TAR.XZ, TAR.ZST, encrypted ZIP, Unicode filenames and output paths, modification times, duplicate output names, bounded preview, unsafe paths, and missing split volumes.
 
 Regression checks also cancel compression and extraction after streaming has begun, assert that no staging directories remain, and round-trip a ZIP containing more than 999 volumes. The writer and split input stream are closed before staging cleanup on Windows.
+
+The `0.1.1.1` checks add a 24-level directory round trip, a source file truncated during streaming, and TAR hard links both within the staging tree and targeting a file in the caller's working directory. Incomplete input and hard links are rejected without published or staged output. The latest MinGW Debug run passed in 4.47 seconds. Clang-tidy 23 identified unnecessary copies/temporary strings and an exception escaping the cleanup path; those findings were fixed. Remaining diagnostics concern existing readability conventions, adjacent parameter types, and the standard library's signed I/O flag enums; the analysis is not represented as warning-free.
 
 ```powershell
 ctest --test-dir build/windows-release --output-on-failure --timeout 30
@@ -39,6 +41,18 @@ The screenshot utility captures screen pixels without resizing the image. Visual
 
 The September 8, 2026 run passed at 144 DPI after the issue #2 fix. Screenshots under `artifacts/issue-2/ui/20260908-014601` confirm that selected row checkboxes match the header's accent fill in both Light and Dark appearance. The same run verified folder/child selection, partial extraction, selection across two archives with 262 entries, full extraction, and cancellation cleanup. High Contrast rendering still needs an interactive check; the fix inherits WinUI's theme resources without replacing its colors or control template.
 
+The September 9 build passed the complete UI run at 144 DPI in `artifacts/optimization/final-ui/20260909-034116`. Light and Dark screenshots, normal/compact/minimum layouts, and the options motion samples were retained. In-page containers now reference WinUI's `ControlCornerRadius` (4 DIP), including the former 6-DIP drop area; buttons, inputs, Expander, and list selection retain their native templates. Windows and flyouts retain the platform's 8-DIP treatment. This follows [Microsoft's geometry guidance](https://learn.microsoft.com/en-us/windows/apps/design/style/rounded-corner).
+
+## Standalone setup and PowerShell
+
+`eng/verify-setup.ps1` copies only `UnfurlSetup.exe` to a directory with spaces and Chinese characters, then uses UI Automation to verify idle cancellation, retryable preparation errors, cancellation during an active dependency download, or a completed Windows App Installer page. It waits for the real Install/Reinstall/Launch action after the loading screen and does not click it. Screenshots and payload cleanup checks accompany each result.
+
+The September 9 tests verified normal handoff with the current release feed and installed Microsoft frameworks. An isolated, short-lived certificate fixture verified that the fixed elevated helper imports its embedded public certificate into Local Machine / Trusted People, never Trusted Root. That test certificate and its private key were removed afterward. A fixture forced the normal pinned HTTPS framework download; signature/hash verification succeeded, and Windows returned the expected `0x80073D02` when redeployment met an in-use framework. Setup exposed a retryable error. Cancelling another download cleaned its temporary payload. Restoring the real dependency metadata reused the installed framework and reached the Windows confirmation page. Successful first-time deployment of every prerequisite on a pristine VM and standard-user UAC consent remain untested.
+
+Setup uses WinUI typography, Mica, theme brushes, the native title bar and button styles, and a polite UI Automation live region for status changes. Its normal entry point uses the invoking user's context; elevation performs only the fixed public-certificate import. Runtime preparation uses native Windows APIs and does not start PowerShell.
+
+All 17 repository PowerShell entry points require PowerShell 7 and pass PSScriptAnalyzer 1.24.0 with the checked-in settings. UTF-8 without a BOM is intentional for PowerShell 7. Analysis checks formatting, approved function verbs, automatic-variable use, and error-prone syntax. The shell-registration and portable-runtime scripts support `-WhatIf`; those dry runs were checked without changing Explorer registrations. `eng/inspect-update.ps1` successfully reported the public feed and `NoUpdates` from PowerShell 7. Only its WinRT query and the Windows Appx module use the documented [Windows PowerShell compatibility boundary](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_windows_powershell_compatibility?view=powershell-7.5).
+
 ## Coverage limits
 
 Only one physical display and 150% scaling were available. Moving between displays with different DPI, other scaling settings, and a clean-machine runtime installation still need separate hardware or VM checks. Explorer integration scripts are syntax-checked; local UI verification does not install registry entries. The portable application is unpackaged and unsigned.
@@ -53,8 +67,8 @@ The same machine then uninstalled that localhost-enrolled package and installed 
 
 The installed app loaded WinUI from the declared Windows App Runtime framework and its C++ DLLs from the VCLibs UWPDesktop framework. The local machine already had those frameworks; dependency installation on a clean machine and the full eight-hour background schedule remain separate environment checks.
 
-Run the Windows update diagnostic using Windows PowerShell 5.1 (its WinRT projection is not available in PowerShell 7):
+Run the update diagnostic from PowerShell 7. Its read-only WinRT query uses an explicit Windows PowerShell compatibility session because that Windows projection requires .NET Framework; parameter handling, validation, and output run in PowerShell 7. The native setup executable does not launch PowerShell.
 
 ```powershell
-powershell.exe -NoProfile -File eng/inspect-update.ps1 -ExpectedAvailability NoUpdates
+pwsh -NoProfile -File eng/inspect-update.ps1 -ExpectedAvailability NoUpdates
 ```

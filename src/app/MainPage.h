@@ -118,6 +118,7 @@ struct MainPage : Microsoft::UI::Xaml::Controls::PageT<MainPage> {
     std::uint64_t operation_id_{};
     hstring status_detail_;
     std::optional<double> collapse_scroll_target_;
+    std::optional<bool> compact_layout_;
     double collapsing_options_height_{};
     bool reveal_options_{};
     bool busy_{};

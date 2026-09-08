@@ -20,6 +20,8 @@
 namespace unfurl {
 namespace {
 
+constexpr std::size_t io_buffer_size = std::size_t{128} * 1024;
+
 // libarchive converts entry names through the CRT locale, even with wide file handles.
 // Scope UTF-8 to the worker thread and restore the caller's locale on return.
 struct ArchiveLocale {
@@ -51,9 +53,9 @@ std::filesystem::path utf8_path(std::string_view value) {
 
 int open_archive_reader(archive* reader, const std::filesystem::path& path) {
 #ifdef _WIN32
-    return archive_read_open_filename_w(reader, path.c_str(), 128 * 1024);
+    return archive_read_open_filename_w(reader, path.c_str(), io_buffer_size);
 #else
-    return archive_read_open_filename(reader, path.c_str(), 128 * 1024);
+    return archive_read_open_filename(reader, path.c_str(), io_buffer_size);
 #endif
 }
 
@@ -163,7 +165,9 @@ std::filesystem::path unique_path(const std::filesystem::path& requested) {
     const auto stem = native_string(requested.stem());
     const auto extension = native_string(requested.extension());
     for (std::uint32_t index = 2; index < 10000; ++index) {
-        const auto candidate = parent / utf8_path(stem + " (" + std::to_string(index) + ")" + extension);
+        auto name = stem;
+        name.append(" (").append(std::to_string(index)).append(")").append(extension);
+        const auto candidate = parent / utf8_path(name);
         if (!std::filesystem::exists(candidate)) {
             return candidate;
         }
@@ -176,8 +180,12 @@ std::filesystem::path unique_split_path(const std::filesystem::path& requested, 
     const auto stem = native_string(requested.stem());
     const auto extension = native_string(requested.extension());
     for (std::uint32_t index = 1; index < 10000; ++index) {
-        const auto candidate =
-            index == 1 ? requested : parent / utf8_path(stem + " (" + std::to_string(index) + ")" + extension);
+        auto candidate = requested;
+        if (index != 1) {
+            auto name = stem;
+            name.append(" (").append(std::to_string(index)).append(")").append(extension);
+            candidate = parent / utf8_path(name);
+        }
         if (std::filesystem::exists(candidate))
             continue;
         bool volume_exists = false;
@@ -244,8 +252,14 @@ bool is_windows_metadata(const std::filesystem::path& path) {
 }
 
 void remove_tree(const std::filesystem::path& path) noexcept {
-    std::error_code ignored;
-    std::filesystem::remove_all(path, ignored);
+    try {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
+    } catch (...) {
+        // Even the error_code overload may allocate. Cleanup during unwinding
+        // must not terminate the process or replace the original archive error.
+        return;
+    }
 }
 
 struct TemporaryTree {
@@ -395,7 +409,7 @@ std::filesystem::path prepare_archive_source(const std::filesystem::path& source
     if (directory_error)
         throw ArchiveFailure(ArchiveFailure::Code::io, "Cannot inspect archive volumes.");
 
-    std::vector<char> buffer(1024 * 1024);
+    std::vector<char> buffer(io_buffer_size);
     for (std::uint32_t index = 1; index <= highest_volume; ++index) {
         check_cancelled(cancelled);
         auto suffix = std::to_string(index);
@@ -430,18 +444,18 @@ std::filesystem::path publish_staged_directory(const std::filesystem::path& stag
                                                bool unwrap_single_directory = true) {
     std::filesystem::path root = staging;
     std::error_code error;
-    std::vector<std::filesystem::path> children;
-    for (const auto& child : std::filesystem::directory_iterator(staging, error)) {
-        if (!error) {
-            children.push_back(child.path());
-        }
+    std::filesystem::directory_iterator child(staging, error), end;
+    std::filesystem::path single_child;
+    if (!error && child != end) {
+        single_child = child->path();
+        child.increment(error);
     }
     if (error) {
         throw ArchiveFailure(ArchiveFailure::Code::io, "Cannot inspect staged output.");
     }
-    if (unwrap_single_directory && children.size() == 1 && std::filesystem::is_directory(children.front(), error) &&
-        !error) {
-        root = children.front();
+    if (unwrap_single_directory && !single_child.empty() && child == end &&
+        std::filesystem::is_directory(single_child, error) && !error) {
+        root = std::move(single_child);
         name = native_string(root.filename());
     }
     const auto output = unique_path(destination / utf8_path(name));
@@ -464,6 +478,9 @@ std::string entry_path(const archive_entry* entry) {
 }
 
 void validate_link(const archive_entry* entry, std::string_view path) {
+    // Do not let a format resolve a hard-link target against the process directory.
+    if (archive_entry_hardlink(const_cast<archive_entry*>(entry)) != nullptr)
+        throw ArchiveFailure(ArchiveFailure::Code::unsafe_path, "Hard links are not extracted.");
     const auto validate = [path](const char* target, std::string_view kind) {
         if (target == nullptr) {
             return;
@@ -478,13 +495,15 @@ void validate_link(const archive_entry* entry, std::string_view path) {
         }
     };
     validate(archive_entry_symlink(const_cast<archive_entry*>(entry)), "symbolic link");
-    validate(archive_entry_hardlink(const_cast<archive_entry*>(entry)), "hard link");
 }
 
 void write_entry_data(archive* writer, archive* reader, archive_entry* entry, std::uint64_t& bytes,
                       const std::function<bool()>& cancelled, const ArchiveEngine::ProgressCallback& progress,
                       std::string_view path) {
     check_status(archive_write_header(writer, entry), writer, "Cannot write an archive header.");
+    ArchiveUpdate update;
+    if (progress)
+        update.path = path;
     if (archive_entry_filetype(entry) == AE_IFREG) {
         while (true) {
             check_cancelled(cancelled);
@@ -504,7 +523,8 @@ void write_entry_data(archive* writer, archive* reader, archive_entry* entry, st
             }
             bytes += static_cast<std::uint64_t>(size);
             if (progress) {
-                progress(ArchiveUpdate{std::string(path), bytes, std::nullopt});
+                update.bytes = bytes;
+                progress(update);
             }
         }
     } else {
@@ -526,7 +546,7 @@ const std::filesystem::path& ArchiveResult::output() const {
     return outputs.front();
 }
 
-ArchiveFailure::ArchiveFailure(Code code, std::string message) : std::runtime_error(std::move(message)), code_(code) {
+ArchiveFailure::ArchiveFailure(Code code, const std::string& message) : std::runtime_error(message), code_(code) {
 }
 
 ArchiveFailure::Code ArchiveFailure::code() const noexcept {
@@ -585,11 +605,13 @@ std::string ArchiveEngine::safe_relative_path(std::string_view value) {
         throw ArchiveFailure(ArchiveFailure::Code::unsafe_path, "The archive contains an absolute path.");
     }
     std::string result;
+    result.reserve(normalized.size());
     std::size_t start = 0;
     std::size_t components = 0;
     while (start <= normalized.size()) {
         const auto end = normalized.find('/', start);
-        const auto part = normalized.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        const auto part =
+            std::string_view(normalized).substr(start, end == std::string::npos ? std::string::npos : end - start);
         if (part == "..") {
             throw ArchiveFailure(ArchiveFailure::Code::unsafe_path, "The archive attempts to leave its destination.");
         }
@@ -746,10 +768,10 @@ ArchiveResult ArchiveEngine::extract(const std::filesystem::path& source, const 
                 continue;
             }
             const auto type = archive_entry_filetype(entry);
+            validate_link(entry, safe);
             if (type != AE_IFREG && type != AE_IFDIR && type != AE_IFLNK) {
                 throw ArchiveFailure(ArchiveFailure::Code::unsafe_path, "The archive contains a special file.");
             }
-            validate_link(entry, safe);
             if (selected_paths) {
                 // Match complete path components, including implicit parent directories.
                 bool included = false;
@@ -905,6 +927,9 @@ ArchiveResult ArchiveEngine::compress(const std::vector<std::filesystem::path>& 
 #endif
         std::uint64_t entries = 0;
         std::uint64_t bytes = 0;
+        // One heap buffer serves the entire traversal; a buffer in the recursive
+        // lambda would reserve 128 KiB of stack for every directory level.
+        std::vector<char> buffer(io_buffer_size);
         const auto append = [&](const std::filesystem::path& file, const std::string& relative,
                                 auto&& append_ref) -> void {
             check_cancelled(cancelled);
@@ -976,7 +1001,10 @@ ArchiveResult ArchiveEngine::compress(const std::vector<std::filesystem::path>& 
                 if (!input) {
                     throw ArchiveFailure(ArchiveFailure::Code::io, "Cannot read a selected file.");
                 }
-                std::array<char, 128 * 1024> buffer{};
+                std::uint64_t file_bytes = 0;
+                ArchiveUpdate update;
+                if (progress)
+                    update.path = relative;
                 while (input) {
                     check_cancelled(cancelled);
                     input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
@@ -990,9 +1018,15 @@ ArchiveResult ArchiveEngine::compress(const std::vector<std::filesystem::path>& 
                                              detail == nullptr ? "Cannot write file data." : std::string(detail));
                     }
                     bytes += static_cast<std::uint64_t>(written);
-                    if (progress)
-                        progress(ArchiveUpdate{relative, bytes, std::nullopt});
+                    file_bytes += static_cast<std::uint64_t>(written);
+                    if (progress) {
+                        update.bytes = bytes;
+                        progress(update);
+                    }
                 }
+                if (input.bad() || file_bytes != size)
+                    throw ArchiveFailure(ArchiveFailure::Code::io,
+                                         "The selected file changed or could not be read completely.");
                 check_status(archive_write_finish_entry(writer), writer, "Cannot finish a file entry.");
                 ++entries;
             } else {
@@ -1021,7 +1055,6 @@ ArchiveResult ArchiveEngine::compress(const std::vector<std::filesystem::path>& 
         if (!input)
             throw ArchiveFailure(ArchiveFailure::Code::io, "Cannot read temporary archive output.");
         std::uint32_t index = 1;
-        std::vector<char> buffer(1024 * 1024);
         while (input) {
             check_cancelled(cancelled);
             const auto volume = staging / ("volume." + std::to_string(index));
@@ -1030,6 +1063,7 @@ ArchiveResult ArchiveEngine::compress(const std::vector<std::filesystem::path>& 
                 throw ArchiveFailure(ArchiveFailure::Code::io, "Cannot create a split archive volume.");
             std::uint64_t remaining = *options.split_size;
             while (remaining > 0 && input) {
+                check_cancelled(cancelled);
                 const auto amount = static_cast<std::streamsize>(std::min<std::uint64_t>(remaining, buffer.size()));
                 input.read(buffer.data(), amount);
                 const auto count = input.gcount();

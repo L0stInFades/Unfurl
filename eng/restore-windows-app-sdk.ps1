@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 
 $version = '2.4.0'
@@ -24,4 +25,4 @@ if (-not (Test-Path (Join-Path $root 'include\MddBootstrap.h')) -or
     }
 }
 
-Write-Host "Windows App SDK $version restored to $root"
+Write-Information -InformationAction Continue "Windows App SDK $version restored to $root"

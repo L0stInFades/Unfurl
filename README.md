@@ -77,3 +77,5 @@ The product and engineering constraints were derived from [L0stInFades/Unfold](h
 ## License
 
 Unfurl is available under the MIT License. See [LICENSE](LICENSE).
+
+For a guided installation, download just [UnfurlSetup.exe](https://github.com/L0stInFades/Unfurl/releases/latest/download/UnfurlSetup.exe) and open it normally. The standalone WinUI 3 installer embeds the public certificate and update feed, prepares missing Microsoft components, and requests administrator confirmation only for certificate trust. It then opens Windows App Installer for your final confirmation and automatic-update enrollment. No adjacent files are needed.

@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$Output = (Join-Path $PSScriptRoot '..\src\app\Unfurl.ico')
 )
@@ -46,4 +48,4 @@ $bitmap.Dispose()
 & ffmpeg -y -loglevel error -i $pngPath -c:v png $outputPath
 if ($LASTEXITCODE -ne 0) { throw "ffmpeg failed while encoding the icon." }
 Remove-Item -LiteralPath $pngPath -Force
-Write-Host "Created $outputPath"
+Write-Information -InformationAction Continue "Created $outputPath"

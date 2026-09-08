@@ -266,10 +266,13 @@ void MainPage::BuildUi() {
 
 void MainPage::UpdateResponsiveLayout(double width) {
     const auto compact = width < 560;
-    name_format_.RowSpacing(compact ? 10 : 0);
-    Grid::SetColumn(archive_name_, compact ? 1 : 2);
-    Grid::SetRow(archive_name_, compact ? 1 : 0);
-    Grid::SetColumnSpan(archive_name_, compact ? 3 : 1);
+    if (compact_layout_ != compact) {
+        compact_layout_ = compact;
+        name_format_.RowSpacing(compact ? 10 : 0);
+        Grid::SetColumn(archive_name_, compact ? 1 : 2);
+        Grid::SetRow(archive_name_, compact ? 1 : 0);
+        Grid::SetColumnSpan(archive_name_, compact ? 3 : 1);
+    }
     items_.Height(std::clamp(static_cast<double>(items_.Items().Size()) * 32 + 8, 40.0, 136.0));
 }
 
@@ -476,8 +479,8 @@ void MainPage::ClearSelection() {
     ++operation_id_;
     selected_paths_.clear();
     selected_archives_.clear();
-    preview_entries_.clear();
-    entry_selection_.clear();
+    std::vector<PreviewEntry>().swap(preview_entries_);
+    std::vector<bool>().swap(entry_selection_);
     output_directory_.clear();
     last_output_.clear();
     updating_selection_ = true;
@@ -814,21 +817,26 @@ void MainPage::StartArchiveTask(ArchiveTask task, bool extracting) {
     std::thread([lifetime = get_strong(), task = std::move(task), extracting, cancellation, operation] {
         try {
             auto last_progress = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+            const auto progress_pending = std::make_shared<std::atomic_bool>(false);
             const auto result = task(
                 [cancellation] { return cancellation->load(std::memory_order_relaxed); },
-                [lifetime, cancellation, operation, extracting, &last_progress](const unfurl::ArchiveUpdate& update) {
+                [lifetime, cancellation, progress_pending, operation, extracting,
+                 &last_progress](const unfurl::ArchiveUpdate& update) {
                     const auto now = std::chrono::steady_clock::now();
                     if (cancellation->load(std::memory_order_relaxed) ||
-                        now - last_progress < std::chrono::milliseconds(100))
+                        now - last_progress < std::chrono::milliseconds(100) ||
+                        progress_pending->exchange(true, std::memory_order_relaxed))
                         return;
                     last_progress = now;
-                    lifetime->dispatcher_.TryEnqueue(
-                        [lifetime, cancellation, operation, extracting, path = update.path, bytes = update.bytes] {
+                    if (!lifetime->dispatcher_.TryEnqueue([lifetime, cancellation, progress_pending, operation,
+                                                           extracting, path = update.path, bytes = update.bytes] {
+                            progress_pending->store(false, std::memory_order_relaxed);
                             if (lifetime->operation_id_ != operation || cancellation->load(std::memory_order_relaxed))
                                 return;
                             lifetime->SetStatus((extracting ? hstring(L"正在解压：") : hstring(L"正在压缩：")) +
                                                 from_utf8(path) + L"；" + display_size(bytes));
-                        });
+                        }))
+                        progress_pending->store(false, std::memory_order_relaxed);
                 });
             lifetime->dispatcher_.TryEnqueue([lifetime, result, extracting, operation] {
                 if (lifetime->operation_id_ != operation)

@@ -35,28 +35,35 @@ void write_octal_field(char* target, std::size_t width, std::uint64_t value) {
     target[width - 1] = ' ';
 }
 
-void write_malicious_tar(const fs::path& path) {
+void write_tar_entry(std::ofstream& output, std::string_view entry_name, std::string_view link = {}) {
     std::array<char, 512> header{};
-    constexpr std::string_view entry_name = "../escape.txt";
     std::memcpy(header.data(), entry_name.data(), entry_name.size());
     write_octal_field(header.data() + 100, 8, 0644);
     write_octal_field(header.data() + 108, 8, 0);
     write_octal_field(header.data() + 116, 8, 0);
-    write_octal_field(header.data() + 124, 12, 1);
+    write_octal_field(header.data() + 124, 12, link.empty() ? 1 : 0);
     write_octal_field(header.data() + 136, 12, 0);
     std::fill(header.begin() + 148, header.begin() + 156, ' ');
-    header[156] = '0';
+    header[156] = link.empty() ? '0' : '1';
+    if (!link.empty())
+        std::memcpy(header.data() + 157, link.data(), link.size());
     std::memcpy(header.data() + 257, "ustar\0", 6);
     std::memcpy(header.data() + 263, "00", 2);
     std::uint32_t checksum = 0;
     for (const auto byte : header)
         checksum += static_cast<unsigned char>(byte);
     write_octal_field(header.data() + 148, 8, checksum);
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output.write(header.data(), static_cast<std::streamsize>(header.size()));
-    output.put('x');
-    std::array<char, 511> padding{};
-    output.write(padding.data(), static_cast<std::streamsize>(padding.size()));
+    if (link.empty()) {
+        output.put('x');
+        std::array<char, 511> padding{};
+        output.write(padding.data(), static_cast<std::streamsize>(padding.size()));
+    }
+}
+
+void write_malicious_tar(const fs::path& path) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    write_tar_entry(output, "../escape.txt");
     std::array<char, 1024> end{};
     output.write(end.data(), static_cast<std::streamsize>(end.size()));
 }
@@ -443,6 +450,73 @@ int run_tests() {
     }
     assert(cancel_requested && stream_cancelled);
     assert(!fs::exists(archives / "cancelled-stream.zip"));
+
+    // A deep traversal must not put the streaming buffer on every recursive frame.
+    const auto deep_root = root / "deep";
+    auto deep_directory = deep_root;
+    for (int depth = 0; depth < 24; ++depth)
+        deep_directory /= "d";
+    fs::create_directories(deep_directory);
+    const auto deep_input = deep_directory / "leaf.txt";
+    std::ofstream(deep_input) << "deep archive fixture";
+    const auto deep_archive = unfurl::ArchiveEngine::compress({deep_root}, archives, "deep");
+    const auto deep_output = unfurl::ArchiveEngine::extract(deep_archive.output(), root / "deep-output");
+    assert(fs::file_size(deep_output.output() / fs::relative(deep_input, deep_root)) == fs::file_size(deep_input));
+
+    const auto changing_input = root / "changing.bin";
+    fs::copy_file(stream_input, changing_input);
+    bool shortened = false;
+    bool incomplete_rejected = false;
+    try {
+        (void)unfurl::ArchiveEngine::compress({changing_input}, archives, "incomplete", {}, {},
+                                              [&](const unfurl::ArchiveUpdate&) {
+                                                  if (!shortened) {
+                                                      fs::resize_file(changing_input, 0);
+                                                      shortened = true;
+                                                  }
+                                              });
+    } catch (const unfurl::ArchiveFailure& error) {
+        incomplete_rejected = error.code() == unfurl::ArchiveFailure::Code::io;
+    }
+    assert(shortened && incomplete_rejected);
+    assert(!fs::exists(archives / "incomplete.zip"));
+
+    const auto hardlink_archive = archives / "hardlink.tar";
+    {
+        std::ofstream output(hardlink_archive, std::ios::binary);
+        write_tar_entry(output, "target.txt");
+        write_tar_entry(output, "alias.txt", "target.txt");
+        std::array<char, 1024> end{};
+        output.write(end.data(), end.size());
+    }
+    bool hardlink_rejected = false;
+    try {
+        (void)unfurl::ArchiveEngine::extract(hardlink_archive, root / "hardlink-output");
+    } catch (const unfurl::ArchiveFailure& error) {
+        hardlink_rejected = error.code() == unfurl::ArchiveFailure::Code::unsafe_path;
+    }
+    assert(hardlink_rejected);
+    assert(fs::is_empty(root / "hardlink-output"));
+    const auto missing_link_archive = archives / "missing-link.tar";
+    {
+        std::ofstream output(missing_link_archive, std::ios::binary);
+        write_tar_entry(output, "alias.txt", "outside.txt");
+        std::array<char, 1024> end{};
+        output.write(end.data(), end.size());
+    }
+    // The target exists in the caller's current directory, outside staging.
+    std::ofstream(root / "outside.txt") << "private data";
+    const auto previous_directory = fs::current_path();
+    fs::current_path(root);
+    bool outside_link_rejected = false;
+    try {
+        (void)unfurl::ArchiveEngine::extract(missing_link_archive, root / "missing-link-output");
+    } catch (const unfurl::ArchiveFailure&) {
+        outside_link_rejected = true;
+    }
+    fs::current_path(previous_directory);
+    assert(outside_link_rejected);
+    assert(fs::is_empty(root / "missing-link-output"));
 
     const auto many_volumes = unfurl::ArchiveEngine::compress(
         {stream_input}, archives, "many-volumes",

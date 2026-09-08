@@ -50,7 +50,7 @@
             </StackPanel>
           </Grid>
           <TextBlock x:Name="SelectionDetail" FontSize="12" TextTrimming="CharacterEllipsis" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-          <Border x:Name="DropZone" MinHeight="104" CornerRadius="6" AllowDrop="True" BorderThickness="1"
+          <Border x:Name="DropZone" MinHeight="104" CornerRadius="{ThemeResource ControlCornerRadius}" AllowDrop="True" BorderThickness="1"
                   BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
             <Grid>
               <StackPanel x:Name="EmptySelection" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16">
@@ -88,7 +88,7 @@
         </StackPanel>
         <StackPanel x:Name="SettingsPanel" Spacing="8">
           <TextBlock x:Name="SettingsHeading" Text="输出设置" FontWeight="SemiBold" Margin="0,0,0,4" />
-          <Grid x:Name="NameFormatGrid" Padding="14,12" ColumnSpacing="12" RowSpacing="10" CornerRadius="4" BorderThickness="1"
+          <Grid x:Name="NameFormatGrid" Padding="14,12" ColumnSpacing="12" RowSpacing="10" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="1"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
             <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="112" /><ColumnDefinition Width="*" /><ColumnDefinition Width="112" /></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -159,7 +159,7 @@
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <StackPanel Spacing="8">
         <TextBlock Text="外观" FontWeight="SemiBold" Margin="0,0,0,4" />
-        <Grid Padding="16,14" ColumnSpacing="16" CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+        <Grid Padding="16,14" ColumnSpacing="16" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
           <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /><ColumnDefinition Width="164" /></Grid.ColumnDefinitions>
           <FontIcon Glyph="&#xE790;" FontSize="20" VerticalAlignment="Center" />
           <TextBlock Grid.Column="1" Text="颜色模式" VerticalAlignment="Center" TextWrapping="Wrap" />
